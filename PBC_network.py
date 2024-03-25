@@ -10,6 +10,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcol
 import matplotlib.cm as cm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # from shapely.geometry import Polygon
 import time
@@ -498,17 +499,17 @@ def generategraphdata(input_intersectionsets_list, input_lines):
             ]
         )
 
-    adjacency_matrix_list = []
+    incidence_matrix_list = []
     for i in range(len(edges)):
-        adjacency_matrix_list.append([])
+        incidence_matrix_list.append([])
         for j in range(len(nodes)):
-            adjacency_matrix_list[i].append([0])
+            incidence_matrix_list[i].append([0])
 
     for index in range(len(node_connections)):
-        adjacency_matrix_list[index][node_connections[index][0] - 1] = [
+        incidence_matrix_list[index][node_connections[index][0] - 1] = [
             -1 * edge_orientations[index]
         ]
-        adjacency_matrix_list[index][node_connections[index][1] - 1] = [edge_orientations[index]]
+        incidence_matrix_list[index][node_connections[index][1] - 1] = [edge_orientations[index]]
 
     return (
         data,
@@ -516,7 +517,7 @@ def generategraphdata(input_intersectionsets_list, input_lines):
         nodes,
         node_connections,
         edge_orientations,
-        adjacency_matrix_list,
+        incidence_matrix_list,
     )
 
 
@@ -552,7 +553,6 @@ def generategraphdata_2(input_intersectionsets, input_lines):
                 comparison_line = input_lines[item[j]]
 
                 for comparison_segment in comparison_line:
-
                     if intersect(
                         [reference_segment[0][0], reference_segment[1][0]],
                         [reference_segment[0][1], reference_segment[1][1]],
@@ -823,24 +823,24 @@ def generategraphdata_2(input_intersectionsets, input_lines):
         max([max(item) for item in node_connections]) + 1
     )  # This is not right but is dealt with in trim
     num_edges = len(edges)
-    adjacency_matrix_EV_list = []
+    incidence_matrix_EV_list = []
     for i in range(num_edges):
-        adjacency_matrix_EV_list.append([])
+        incidence_matrix_EV_list.append([])
         for j in range(num_nodes):
-            adjacency_matrix_EV_list[i].append(0)
+            incidence_matrix_EV_list[i].append(0)
 
     for index in range(len(node_connections)):
-        adjacency_matrix_EV_list[index][node_connections[index][0] - 1] = (
+        incidence_matrix_EV_list[index][node_connections[index][0] - 1] = (
             -1 * edge_orientations[index]
         )
 
-        adjacency_matrix_EV_list[index][node_connections[index][1] - 1] = edge_orientations[index]
+        incidence_matrix_EV_list[index][node_connections[index][1] - 1] = edge_orientations[index]
 
     #################################
     # Trimming
     # start_time = time.time()
 
-    matrix = np.array(adjacency_matrix_EV_list)
+    matrix = np.array(incidence_matrix_EV_list)
     trimmed_matrix = matrix.copy()
     dangly_edges = []
     deleted_nodes = []
@@ -1188,9 +1188,9 @@ def Plotfigures(coordinates, edges, trimmed_edges, L):
 def PlotNetwork(edges, L):
     fig_network = plt.figure()
     for edge in edges:
-        color = next(plt.gca()._get_lines.prop_cycler)["color"]
+        # color = next(plt.gca()._get_lines.prop_cycler)["color"]
         for segment in edge:
-            plt.plot([segment[0][0], segment[1][0]], [segment[0][1], segment[1][1]], color=color)
+            plt.plot([segment[0][0], segment[1][0]], [segment[0][1], segment[1][1]], color="b")
 
     # Plot the box
     plt.plot([0, L, L, 0, 0], [0, 0, L, L, 0])
@@ -1203,9 +1203,9 @@ def PlotNetwork(edges, L):
     return
 
 
-def PlotNetwork_2(nodes, adjacency_matrix, L, shear_factor):
+def PlotNetwork_2(nodes, incidence_matrix, L, shear_factor):
     new_edges = []
-    for row in adjacency_matrix:
+    for row in incidence_matrix:
         node_1 = list(nodes[np.nonzero(row)[0][0]])
         node_2 = list(nodes[np.nonzero(row)[0][1]])
         new_edges.append([node_1, node_2])
@@ -1213,7 +1213,7 @@ def PlotNetwork_2(nodes, adjacency_matrix, L, shear_factor):
     fig_final = plt.figure()
 
     for edge in new_edges:
-        plt.plot([edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]])
+        plt.plot([edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color="b")
 
     plt.plot([0, L, (1 + shear_factor) * L, shear_factor * L, 0], [0, 0, L, L, 0])
 
@@ -1222,22 +1222,25 @@ def PlotNetwork_2(nodes, adjacency_matrix, L, shear_factor):
 
     plt.gca().set_aspect("equal")
 
-    plt.title(str("shear factor = {}%".format(100 * shear_factor)))
+    plt.title(str(r"$\gamma$ = {}".format(shear_factor)))
+    # plt.savefig(".pdf")
     return
 
 
-def ColormapPlot(nodes, adjacency_matrix, L, shear_factor, initial_lengths, initial_lengths_inv):
+def ColormapPlot(nodes, incidence_matrix, L, shear_factor, initial_lengths):
     strains = (
-        vector_of_magnitudes(adjacency_matrix.dot(nodes)) - initial_lengths
-    ) * initial_lengths_inv
+        vector_of_magnitudes(incidence_matrix.dot(nodes)) - initial_lengths
+    ) / initial_lengths
 
-    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
+    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["w", "r"])
     cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
     cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
     cpick.set_array([])
-    fig_final = plt.figure()
+    fig = plt.figure()
+    plt.title(str(r"$\gamma$ = {}".format(shear_factor)))
+    plt.gca().set_aspect("equal")
     new_edges = []
-    for row in adjacency_matrix:
+    for row in incidence_matrix:
         node_1 = list(nodes[np.nonzero(row)[0][0]])
         node_2 = list(nodes[np.nonzero(row)[0][1]])
         new_edges.append([node_1, node_2])
@@ -1250,17 +1253,101 @@ def ColormapPlot(nodes, adjacency_matrix, L, shear_factor, initial_lengths, init
         )
 
     plt.plot([0, L, (1 + shear_factor) * L, shear_factor * L, 0], [0, 0, L, L, 0])
+    ax = plt.gca()
 
     plt.xlim(0 - 0.1 * L, 1.1 * (1 + shear_factor) * L)
     plt.ylim(0 - 0.1 * L, 1.1 * L)
-    try:
-        plt.colorbar(
-            cpick,
-            boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
-        )
-    except:
-        return
-    plt.gca().set_aspect("equal")
 
-    plt.title(str("shear factor = {}%".format(100 * shear_factor)))
+    plt.colorbar(
+        cpick,
+        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
+        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+    )
+
+    return
+
+
+def ColormapPlot_stretch(nodes, incidence_matrix, L, stretch_factor, initial_lengths):
+    strains = (
+        vector_of_magnitudes(incidence_matrix.dot(nodes)) - initial_lengths
+    ) / initial_lengths
+
+    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["w", "r"])
+    cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
+    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
+    cpick.set_array([])
+    fig = plt.figure()
+    plt.title(str(r"$\lambda$ = {}".format(stretch_factor)))
+    plt.gca().set_aspect("equal")
+    new_edges = []
+    for row in incidence_matrix:
+        node_1 = list(nodes[np.nonzero(row)[0][0]])
+        node_2 = list(nodes[np.nonzero(row)[0][1]])
+        new_edges.append([node_1, node_2])
+
+    for i in range(len(new_edges)):
+        edge = new_edges[i]
+
+        plt.plot(
+            [edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color=cpick.to_rgba(strains[i])
+        )
+
+    plt.plot(
+        [0, (stretch_factor) * L, (stretch_factor) * L, 0, 0],
+        [0, 0, (stretch_factor) * L, (stretch_factor) * L, 0],
+    )
+    ax = plt.gca()
+
+    plt.xlim(0 - 0.1 * L, 1.1 * (stretch_factor) * L)
+    plt.ylim(0 - 0.1 * L, 1.1 * (stretch_factor) * L)
+
+    plt.colorbar(
+        cpick,
+        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
+        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+    )
+
+    return
+
+
+def ColormapPlot_uniaxial_stretch(nodes, incidence_matrix, L, stretch_factor, initial_lengths):
+    strains = (
+        vector_of_magnitudes(incidence_matrix.dot(nodes)) - initial_lengths
+    ) / initial_lengths
+
+    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["w", "r"])
+    cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
+    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
+    cpick.set_array([])
+    fig = plt.figure()
+    plt.title(str(r"$\lambda$ = {}".format(stretch_factor)))
+    # plt.gca().set_aspect("equal")
+    new_edges = []
+    for row in incidence_matrix:
+        node_1 = list(nodes[np.nonzero(row)[0][0]])
+        node_2 = list(nodes[np.nonzero(row)[0][1]])
+        new_edges.append([node_1, node_2])
+
+    for i in range(len(new_edges)):
+        edge = new_edges[i]
+
+        plt.plot(
+            [edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color=cpick.to_rgba(strains[i])
+        )
+
+    plt.plot(
+        [0, L, L, 0, 0],
+        [0, 0, (1 + stretch_factor) * L, (1 + stretch_factor) * L, 0],
+    )
+    ax = plt.gca()
+
+    plt.xlim(0 - 0.1 * L, 1.1 * L)
+    plt.ylim(0 - 0.1 * L, 1.1 * (stretch_factor) * L)
+
+    plt.colorbar(
+        cpick,
+        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
+        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+    )
+
     return
