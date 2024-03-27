@@ -8,6 +8,7 @@ import pickle
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
 import Biaxial_stretch_Radau  # noqa
+import Stretch_Radau  # noqa
 import PBC_network  # noqa
 
 ######################################
@@ -25,8 +26,8 @@ def test():
 
     with open("readme.txt", "w") as read:
         read.write("Info on how far code has progressed")
-    for density_loop in range(5):
-        density = (3 + density_loop) * 10
+    for density_loop in range(1):
+        density = 50  # (3 + density_loop) * 10
 
         with open("readme.txt", "a") as read:
             read.write("\n")
@@ -35,12 +36,12 @@ def test():
         new_data.append([])
         network_data.append([])
         energy_data.append([])
-        for seed in range(5):
-            loop_data = Biaxial_stretch_Radau.Single_realisation_stretch(
-                L, density, seed, 1, 0.5, 2, False, False
+        for seed in range(1):
+            loop_data = Stretch_Radau.Single_realisation_uniaxial_stretch(
+                L, density, 5, 1, 0.2, 16, False, False
             )
 
-            Network = PBC_network.CreateNetwork(density * L**2, L, seed)
+            Network = PBC_network.CreateNetwork(density * L**2, L, 5)
 
             pbc_edges = Network[0][2]
             pbc_nodes = Network[1][2]
@@ -78,8 +79,8 @@ def test():
     return (new_data, network_data, energy_data)
 
 
-# output_data = test()
+output_data = test()
 
 
-# with open("output_data.dat", "wb") as f:
-#     pickle.dump(test(), f)
+with open("output_data.dat", "wb") as f:
+    pickle.dump(test(), f)

@@ -256,7 +256,7 @@ def Radau_timestepper_stretch(
         F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
         product = np.einsum("ij,i->ij", l_j_hat, F_j)
         f_jk = sparse_incidence_transpose.dot(product)
-        return -f_jk
+        return -f_jk  # comment for comments sake
 
     def energy_calc(y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
