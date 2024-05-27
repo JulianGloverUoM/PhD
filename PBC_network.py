@@ -1351,3 +1351,48 @@ def ColormapPlot_uniaxial_stretch(nodes, incidence_matrix, L, stretch_factor, in
     )
 
     return
+
+
+def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initial_lengths):
+    strains = (
+        vector_of_magnitudes(incidence_matrix.dot(nodes)) - initial_lengths
+    ) / initial_lengths
+
+    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
+    cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
+    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
+    cpick.set_array([])
+    fig = plt.figure()
+    plt.title(str(r"$\lambda_1,\lambda_2$ = {},{}".format(lambda_1, lambda_2)))
+    # plt.gca().set_aspect("equal")
+
+    new_edges = []
+    for row in incidence_matrix:
+        node_1 = list(nodes[np.nonzero(row)[0][0]])
+        node_2 = list(nodes[np.nonzero(row)[0][1]])
+        new_edges.append([node_1, node_2])
+
+    for i in range(len(new_edges)):
+        edge = new_edges[i]
+
+        plt.plot(
+            [edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color=cpick.to_rgba(strains[i])
+        )
+
+    plt.plot(
+        [0, lambda_1 * L, lambda_1 * L, 0, 0],
+        [0, 0, lambda_2 * L, lambda_2 * L, 0],
+    )
+    ax = plt.gca()
+
+    plt.xlim(0 - 0.1 * L, 1.1 * lambda_1 * L)
+    plt.ylim(0 - 0.1 * L, 1.1 * lambda_2 * L)
+
+    plt.colorbar(
+        cpick,
+        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
+        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+    )
+    plt.savefig("prestress_example2.pdf")
+
+    return

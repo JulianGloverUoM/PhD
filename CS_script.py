@@ -10,6 +10,9 @@ sys.path.append(file_path)
 import Biaxial_stretch_Radau  # noqa
 import Stretch_Radau  # noqa
 import PBC_network  # noqa
+import Dilation_radau  # noqa
+import Make_plots  # noqa
+
 
 ######################################
 def test():
@@ -19,6 +22,7 @@ def test():
     #     L = 2
     L = 2
     fibre_lengths_multiplier = 1
+    num_intervals = 16
 
     new_data = []
     network_data = []
@@ -27,7 +31,7 @@ def test():
     with open("readme.txt", "w") as read:
         read.write("Info on how far code has progressed")
     for density_loop in range(1):
-        density = 50  # (3 + density_loop) * 10
+        density = 40  # (3 + density_loop) * 10
 
         with open("readme.txt", "a") as read:
             read.write("\n")
@@ -38,7 +42,7 @@ def test():
         energy_data.append([])
         for seed in range(1):
             loop_data = Stretch_Radau.Single_realisation_uniaxial_stretch(
-                L, density, 5, 1, 0.2, 16, False, False
+                L, density, 2, 1, 0.2, num_intervals, False, False
             )
 
             Network = PBC_network.CreateNetwork(density * L**2, L, 5)
@@ -70,7 +74,9 @@ def test():
 
             new_data[density_loop].append(loop_data)
             network_data[density_loop].append([nodes, initial_lengths, incidence_matrix])
-            energy_data[density_loop].append(loop_data[0][0][-1][-1])
+            energy_data[density_loop].append([])
+            for energy_loop in range(num_intervals):
+                energy_data[density_loop][seed].append(loop_data[0][energy_loop][-1][-1])
 
             with open("output_data_inloop.dat", "wb") as loop_info:
                 pickle.dump((new_data, network_data, energy_data), loop_info)
@@ -79,8 +85,19 @@ def test():
     return (new_data, network_data, energy_data)
 
 
-output_data = test()
+(L, density, p, seed, lambda_1, lambda_2) = (
+    sys.argv[1],
+    sys.argv[2],
+    sys.argv[3],
+    sys.argv[4],
+    sys.argv[1],
+    sys.argv[1],
+)
+
+output_data = Make_plots.produce_data(L, density, p, seed, lambda_1, lambda_2)
+
+# output_data = test()
 
 
-with open("output_data.dat", "wb") as f:
-    pickle.dump(test(), f)
+with open("Test_data.dat", "wb") as f:
+    pickle.dump(output_data, f)

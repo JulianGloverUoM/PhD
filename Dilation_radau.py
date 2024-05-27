@@ -1,4 +1,4 @@
-# Uses RK23 method to run biaiaxial stretch deformation on network
+# Uses RK23 method to run biaxial stretch deformation on network
 
 ######################################
 import numpy as np
@@ -18,25 +18,17 @@ import scipy as sp
 #############################################################################
 #############################################################################
 
-# These functions cause a relative extension in the y axis by stretch_factor
+# Applies homogenous stretch/dilation deformation to Nx2 array of N nodes
 
 
-def biaxial_stretch(input_nodes, stretch_factor):
-    num_nodes = np.shape(input_nodes)[0]
-    output = np.empty([num_nodes, 2], dtype=float)
-    deformation = np.array([[1 + stretch_factor, 0], [0, 1 + stretch_factor]])
-    for i in range(num_nodes):
-        output[i] = deformation.dot(input_nodes[i])
-    return output
+def dilation_deformation(input_nodes, lambda_1, lambda_2):
+    return np.array([np.array([[lambda_1, 0], [0, lambda_2]]).dot(item) for item in input_nodes])
 
 
-def invert_biaxial_stretch(input_nodes, stretch_factor):
-    num_nodes = np.shape(input_nodes)[0]
-    output = np.empty([num_nodes, 2], dtype=float)
-    deformation = np.array([[1 / (1 + stretch_factor), 0], [0, 1 / (1 + stretch_factor)]])
-    for i in range(num_nodes):
-        output[i] = deformation.dot(input_nodes[i])
-    return output
+def invert_dilation(input_nodes, lambda_1, lambda_2):
+    return np.array(
+        [np.array([[1 / lambda_1, 0], [0, 1 / lambda_2]]).dot(item) for item in input_nodes]
+    )
 
 
 #############################################################################
@@ -56,6 +48,9 @@ def normalise_elements(input_array):
 
 def vector_of_magnitudes(input_array):
     return np.array([np.sqrt(np.einsum("i,i", vector, vector)) for vector in input_array])
+
+
+# Computes the forbenius norm of a matrix, more efficient than inbuilt np.linalg.norm function
 
 
 def frobenius_norm(input_array):
@@ -185,7 +180,9 @@ def restructure_PBC_data(pbc_edges, pbc_nodes, pbc_incidence_matrix, L):
 #############################################################################
 
 
-def calculate_stress_strain_stretch(data, stretch_stepsize, L, fibre_lengths_multiplier):
+def calculate_stress_strain_stretch(
+    data, lambda_1_step, lambda_2_step, num_steps, L, fibre_lengths_multiplier
+):
     flag_non_zero_initial_stretch = 0
     if fibre_lengths_multiplier == 1:
         flag_non_zero_initial_stretch = 1
@@ -213,17 +210,21 @@ def calculate_stress_strain_stretch(data, stretch_stepsize, L, fibre_lengths_mul
     force_left_sum = [np.sum(item, axis=0) for item in force_left]
     force_right_sum = [np.sum(item, axis=0) for item in force_right]
 
-    p_top = -np.stack(np.array(force_top_sum), axis=0)
-    p_bot = np.stack(np.array(force_bot_sum), axis=0)
+    p_top = -np.stack(np.array(force_top_sum), axis=0) / L
+    p_bot = np.stack(np.array(force_bot_sum), axis=0) / L
     p_left = -np.stack(np.array(force_left_sum), axis=0)
     p_right = -np.stack(np.array(force_right_sum), axis=0)
 
-    for i in range(num_intervals):
-        stretch = (i + flag_non_zero_initial_stretch) * stretch_stepsize
-        p_top[i] = p_top[i] / (L * (1 + stretch))
-        p_bot[i] = p_bot[i] / (L * (1 + stretch))
-        p_left[i] = np.array([[0, -1], [1, 0]]).dot(p_left[i]) / (L * (1 + stretch))
-        p_right[i] = np.array([[0, 1], [-1, 0]]).dot(p_right[i]) / (L * (1 + stretch))
+    for i in range(num_steps):
+        # Compute the side length of the domain and divide forces by the length
+        # The added flag*lambda*L accounts for when the data starts at non-zero stretch
+
+        L_x = L * (1 + i * lambda_1_step) + flag_non_zero_initial_stretch * lambda_1_step * L
+        L_y = L * (1 + i * lambda_2_step) + flag_non_zero_initial_stretch * lambda_2_step * L
+        p_top[i] = p_top[i] / L_x
+        p_bot[i] = p_bot[i] / L_x
+        p_left[i] = np.array([[0, -1], [1, 0]]).dot(p_left[i]) / L_y
+        p_right[i] = np.array([[0, 1], [-1, 0]]).dot(p_right[i]) / L_y
 
     return (
         [force_top, force_bot, force_left, force_right],
@@ -236,8 +237,8 @@ def calculate_stress_strain_stretch(data, stretch_stepsize, L, fibre_lengths_mul
 #############################################################################
 
 
-def Radau_timestepper_stretch(
-    L, nodes, incidence_matrix, boundary_nodes, initial_lengths, stretch_factor, Plot_networks
+def Radau_timestepper_dilation(
+    L, nodes, incidence_matrix, boundary_nodes, initial_lengths, lambda_1, lambda_2, Plot_networks
 ):
     def scipy_fun(t, y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
@@ -256,7 +257,7 @@ def Radau_timestepper_stretch(
         F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
         product = np.einsum("ij,i->ij", l_j_hat, F_j)
         f_jk = sparse_incidence_transpose.dot(product)
-        return -f_jk  # comment for comments sake
+        return -f_jk
 
     def energy_calc(y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
@@ -332,7 +333,7 @@ def Radau_timestepper_stretch(
     # start_time = time.time()
     # print("Shear factor = ", shear_factor)
 
-    y = biaxial_stretch(nodes, stretch_factor)
+    y = dilation_deformation(nodes, lambda_1, lambda_2)
     y = np.reshape(y, 2 * np.shape(y)[0], order="C")
 
     sparse_incidence = sp.sparse.csc_matrix(incidence_matrix)
@@ -378,7 +379,7 @@ def Radau_timestepper_stretch(
             increasing_energy = True
             break
         if np.linalg.norm(scipy_fun(None, y_values[-1])) < 1e-04:
-            print("Integration step finished after time = {}".format(i))
+            print("equilibrium achieved")
             break
 
         y_input = y_values[-1]
@@ -387,6 +388,7 @@ def Radau_timestepper_stretch(
             print(i)
         if i == 100:
             print("convergence not reached in 100 tau")
+            increasing_energy = True
             break
 
     # Some networks contain edges or structures that are stiff and require stricter error
@@ -418,15 +420,14 @@ def Radau_timestepper_stretch(
                     # print(np.linalg.norm(scipy_fun(None, sol.y)))
                     break
             if np.linalg.norm(scipy_fun(None, y_values[-1])) < 1e-04:
-                print("Integration finished after time = {}".format(i))
                 break
 
             y_input = y_values[-1]
             i = i + 1
             if i % 10 == 0:
                 print(i)
-            if i == 100:
-                print("convergence not reached in 100 tau")
+            if i == 200:
+                print("convergence not reached in 200 tau")
                 break
 
     ###############
@@ -468,8 +469,8 @@ def Radau_timestepper_stretch(
     y_output = np.reshape(y_values[-1], (np.shape(incidence_matrix)[1], 2))
     if Plot_networks:
         try:
-            PBC_network.ColormapPlot_stretch(
-                y_output, incidence_matrix, L, stretch_factor, initial_lengths
+            PBC_network.ColormapPlot_dilation(
+                y_output, incidence_matrix, L, lambda_1, lambda_2, initial_lengths
             )
         except IndexError or ZeroDivisionError or ValueError:
             pass
@@ -492,18 +493,24 @@ def Radau_timestepper_stretch(
 #############################################################################
 #############################################################################
 
+# Currently does not properly deal with computing stress-strain results, needs abit of work
 
-def Single_realisation_stretch(
+
+def Realisation_dilation(
     L,
     density,
     seed,
     fibre_lengths_multiplier,
-    stretch_stepsize,
-    num_intervals,
+    max_lambda_1,
+    max_lambda_2,
+    num_steps,
     Plot_stress_results,
     Plot_networks,
 ):
     data = []
+
+    lambda_1_step = (max_lambda_1 - 1) / num_steps
+    lambda_2_step = (max_lambda_2 - 1) / num_steps
 
     stresses = []
 
@@ -534,44 +541,47 @@ def Single_realisation_stretch(
 
     input_nodes = np.copy(nodes)
     flag_skipped_first_computation = 0
-    for i in range(num_intervals):
+    for i in range(num_steps):
         if i == 0 and fibre_lengths_multiplier == 1:
             flag_skipped_first_computation = 1
             continue
         data.append(
-            Radau_timestepper_stretch(
+            Radau_timestepper_dilation(
                 L,
                 input_nodes,
                 incidence_matrix,
                 boundary_nodes,
                 initial_lengths,
-                (stretch_stepsize * i),
+                1 + lambda_1_step * i,
+                1 + lambda_2_step * i,
                 Plot_networks,
             )
         )
         # Each step we provide a guess for the solution at the next step using the previous solution
-        input_nodes = invert_biaxial_stretch(
-            data[i - flag_skipped_first_computation][-2], stretch_stepsize * i
+        input_nodes = invert_dilation(
+            data[i - flag_skipped_first_computation][-2],
+            1 + lambda_1_step * i,
+            1 + lambda_2_step * i,
         )
 
     print("Total Computational time = ", time.time() - total_time)
 
     (p_top, p_bot, p_left, p_right) = calculate_stress_strain_stretch(
-        data, stretch_stepsize, L, fibre_lengths_multiplier
+        data, lambda_1_step, lambda_2_step, num_steps, L, fibre_lengths_multiplier
     )[-1]
 
     stresses.append([p_top, p_bot, p_left, p_right])
 
     if Plot_stress_results:
-        strains = np.linspace(0, stretch_stepsize * (num_intervals - 1), num_intervals)
+        lambda_1 = np.linspace(1, max_lambda_1, num_steps)
+        lambda_2 = np.linspace(1, max_lambda_2, num_steps)
         if fibre_lengths_multiplier == 1:
-            strains = np.linspace(
-                stretch_stepsize, stretch_stepsize * (num_intervals - 1), num_intervals - 1
-            )
+            lambda_1 = np.linspace(1 + lambda_1_step, max_lambda_1, num_steps)
+            lambda_1 = np.linspace(1 + lambda_2_step, max_lambda_2, num_steps)
         plt.figure()
 
-        plt.plot(strains, p_top[:, 0])
-        plt.plot(strains, p_top[:, 1])
+        plt.plot(lambda_1, p_top[:, 0])
+        plt.plot(lambda_1, p_top[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
@@ -580,8 +590,8 @@ def Single_realisation_stretch(
 
         plt.figure()
 
-        plt.plot(strains, p_bot[:, 0])
-        plt.plot(strains, p_bot[:, 1])
+        plt.plot(lambda_1, p_bot[:, 0])
+        plt.plot(lambda_1, p_bot[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
@@ -590,8 +600,8 @@ def Single_realisation_stretch(
 
         plt.figure()
 
-        plt.plot(strains, p_left[:, 0])
-        plt.plot(strains, p_left[:, 1])
+        plt.plot(lambda_2, p_left[:, 0])
+        plt.plot(lambda_2, p_left[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
@@ -600,92 +610,14 @@ def Single_realisation_stretch(
 
         plt.figure()
 
-        plt.plot(strains, p_right[:, 0])
-        plt.plot(strains, p_right[:, 1])
+        plt.plot(lambda_2, p_right[:, 0])
+        plt.plot(lambda_2, p_right[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
         plt.title("Right boundary")
         # plt.savefig("Prestress_05_right.pdf")
     return (data, [p_top, p_bot, p_left, p_right])
-
-
-# Orientation angle is calculated as the angle in the range [0,\pi] that an edge makes with the
-# positive x axis. This is calculated by taking the dot product of an edge vector with e_1 = [1,0]^T
-# And rearanging the dot product formula (mod_pi) to obtain desired result
-
-
-def Orientation_distribution(nodes, incidence_matrix):
-    edge_vectors = incidence_matrix.dot(nodes)
-    orientations_output = []
-    for i in range(len(edge_vectors)):
-        orientations_output.append(
-            np.mod(np.arccos(edge_vectors[i][0] / np.linalg.norm(edge_vectors[i])), np.pi)
-        )
-    return orientations_output
-
-
-def Edge_lengths_and_orientations_histogram_plot(
-    nodes, incidence_matrix, bins_edges, bins_orientations, strain
-):
-    orientations = Orientation_distribution(nodes, incidence_matrix)
-    edge_lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
-    plt.figure()
-    plt.hist(edge_lengths, bins=bins_edges, density=True)
-    plt.title(r"PDF of edge length distribution strain = {}".format(strain))
-
-    plt.figure()
-    plt.hist(orientations, bins=bins_orientations, density=True)
-    plt.title(r"PDF of fibre orientations for strain = {}".format(strain))
-
-    return
-
-
-def Stretch_distribution(nodes, incidence_matrix, initial_lengths, num_bins, strain):
-    stretches = []
-    edge_vectors = incidence_matrix.dot(nodes)
-    edge_lengths = vector_of_magnitudes(edge_vectors)
-    for i in range(len(edge_lengths)):
-        stretches.append(edge_lengths[i] / initial_lengths[i])
-    plt.figure()
-    plt.hist(stretches, bins=num_bins, density=True)
-    plt.title(r"PDF of fibre stretches for strain = {}".format(strain))
-    return
-
-
-def affinity_strain_stretch(initial_nodes, input_nodes, incidence_matrix, stretch_factor):
-    initial_lengths = vector_of_magnitudes(incidence_matrix.dot(initial_nodes))
-    affine_nodes = biaxial_stretch(initial_nodes, stretch_factor)
-    L_affine = incidence_matrix.dot(affine_nodes)
-    L_affine_lengths = vector_of_magnitudes(L_affine)
-    l_j = incidence_matrix.dot(input_nodes)
-    l_j_lengths = vector_of_magnitudes(l_j)
-    strain_affine = (L_affine_lengths - initial_lengths) / initial_lengths
-    strain_actual = (l_j_lengths - initial_lengths) / initial_lengths
-    return np.linalg.norm(strain_actual - strain_affine) / (
-        len(initial_lengths) * np.linalg.norm(strain_affine)
-    )
-
-
-def Spline_derivative_plot(input_data, strains, knots, derivative_order, data_name):
-    input_spl = sp.interpolate.UnivariateSpline(strains, input_data, k=knots)
-    plt.figure()
-    plt.plot(strains, input_data, "ro")
-    plt.plot(strains, input_spl(strains))
-    plt.xlabel(r"Strain, $\gamma$")
-    plt.ylabel(data_name)
-    plt.savefig("5min1.pdf")
-
-    plt.show()
-    input_spl_deriv = input_spl.derivative(n=derivative_order)
-    plt.figure()
-    derivs = input_spl_deriv(strains)
-    plt.plot(strains, derivs)
-    plt.plot(strains, derivs, "ko")
-    plt.xlabel(r"Stretch, $\lambda$")
-    plt.ylabel("Order {} derivative of {}".format(derivative_order, data_name))
-    plt.savefig("5min2.pdf")
-    return
 
 
 # Jacobian calculation is identical to hessian excepting the df_i/dr_k elements when f_i==0 as a
@@ -696,7 +628,7 @@ def hessian_component(l_j_hat, stretch):
     return l_j_outer - coefficient * (np.eye(2) - l_j_outer)
 
 
-def hessian(nodes, incidence_matrix, initial_lengths, boundary_nodes):
+def jacobian(nodes, incidence_matrix, initial_lengths, boundary_nodes):
     num_edges, num_nodes = np.shape(incidence_matrix)
     edge_vectors = incidence_matrix.dot(nodes)
     edge_lengths = vector_of_magnitudes(edge_vectors)
@@ -708,13 +640,13 @@ def hessian(nodes, incidence_matrix, initial_lengths, boundary_nodes):
         # These checks incorporate the Neumann BCs. Note as we are calculating just the upper triangular block, i<k
         # Hence if i is on the boundary k must be as well, if i is not a boundary node then k might be, in which
         # case df_i/dr_k = 0 but df_k/dr_i =/= 0 so we calculate it.
-        # if i >= boundary_nodes:
-        #     continue
-        # if k >= boundary_nodes:
-        #     stretch = edge_lengths[edge] / initial_lengths[edge]
-        #     component = -hessian_component(edge_vectors_normalised[edge], stretch)
-        #     hessian[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
-        #     continue
+        if i >= boundary_nodes:
+            continue
+        if k >= boundary_nodes:
+            stretch = edge_lengths[edge] / initial_lengths[edge]
+            component = -hessian_component(edge_vectors_normalised[edge], stretch)
+            hessian[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
+            continue
         stretch = edge_lengths[edge] / initial_lengths[edge]
         component = -hessian_component(edge_vectors_normalised[edge], stretch)
         hessian[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
@@ -735,12 +667,76 @@ def hessian(nodes, incidence_matrix, initial_lengths, boundary_nodes):
     return hessian
 
 
-def predicted_strain_energy(lambda_1, lambda_2):
-    return 0.25 * (
-        lambda_1**2
-        + lambda_2**2
-        - (8 * lambda_1 / np.pi) * sp.special.ellipe(1 - (lambda_1 / lambda_2) ** 2)
-        + 2
+# Orientation angle is calculated as the angle in the range [0,\pi] that an edge makes with the
+# positive x axis. This is calculated by taking the dot product of an edge vector with e_1 = [1,0]^T
+# And rearanging the dot product formula (mod_pi) to obtain desired result
+
+
+def Orientation_distribution(nodes, incidence_matrix, Plot_data):
+    edge_vectors = incidence_matrix.dot(nodes)
+    lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
+    orientations_output = []
+    for i in range(len(edge_vectors)):
+        orientations_output.append(
+            np.mod(np.arccos(edge_vectors[i][0] / np.linalg.norm(edge_vectors[i])), np.pi)
+        )
+    if Plot_data:
+        plt.figure()
+        plt.hist(
+            orientations_output,
+            bins=min(int(np.shape(incidence_matrix)[0] / 10), 40),
+            density=True,
+            weights=lengths,
+        )
+        plt.xlabel(r"$\theta$")
+        plt.title(r"PDF of fibre orientations")
+    return orientations_output
+
+
+def Edge_lengths_and_orientations_histogram_plot(
+    nodes, incidence_matrix, bins_edges, bins_orientations, lambda_1, lambda_2
+):
+    orientations = Orientation_distribution(nodes, incidence_matrix)
+    edge_lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
+    plt.figure()
+    plt.hist(edge_lengths, bins=bins_edges, density=True)
+    plt.title(
+        r"PDF of edge length distribution for $(\lambda_1,\lambda_2)$ = {}".format(
+            lambda_1, lambda_2
+        )
+    )
+
+    plt.figure()
+    plt.hist(orientations, bins=bins_orientations, density=True)
+    plt.title(
+        r"PDF of fibre orientations for $(\lambda_1,\lambda_2)$ = {}".format(lambda_1, lambda_2)
+    )
+    return
+
+
+def Stretch_distribution(nodes, incidence_matrix, initial_lengths, num_bins, lambda_1, lambda_2):
+    stretches = []
+    edge_vectors = incidence_matrix.dot(nodes)
+    edge_lengths = vector_of_magnitudes(edge_vectors)
+    for i in range(len(edge_lengths)):
+        stretches.append(edge_lengths[i] / initial_lengths[i])
+    plt.figure()
+    plt.hist(stretches, bins=num_bins, density=True)
+    plt.title(r"PDF of fibre stretches for $(\lambda_1,\lambda_2)$ = {}".format(lambda_1, lambda_2))
+    return
+
+
+def affinity_strain_stretch(initial_nodes, input_nodes, incidence_matrix, lambda_1, lambda_2):
+    initial_lengths = vector_of_magnitudes(incidence_matrix.dot(initial_nodes))
+    affine_nodes = dilation_deformation(initial_nodes, lambda_1, lambda_2)
+    L_affine = incidence_matrix.dot(affine_nodes)
+    L_affine_lengths = vector_of_magnitudes(L_affine)
+    l_j = incidence_matrix.dot(input_nodes)
+    l_j_lengths = vector_of_magnitudes(l_j)
+    strain_affine = (L_affine_lengths - initial_lengths) / initial_lengths
+    strain_actual = (l_j_lengths - initial_lengths) / initial_lengths
+    return np.linalg.norm(strain_actual - strain_affine) / (
+        len(initial_lengths) * np.linalg.norm(strain_affine)
     )
 
 
@@ -769,3 +765,21 @@ def chi_deformed(stretches, orientations, lambda_1, lambda_2):
     for i, item in enumerate(orientations):
         output.append(stretches[i] / affine_stretch_def_calc(item, lambda_1, lambda_2))
     return output
+
+
+def affine_theta_calc(lambda_1, lambda_2, initial_thetas):
+    return [
+        np.arcsin(
+            lambda_2
+            * np.sin(item)
+            / np.sqrt(lambda_1**2 * np.cos(item) ** 2 + lambda_2**2 * np.sin(item) ** 2)
+        )
+        if 0 <= item <= np.pi / 2
+        else np.pi
+        - np.arcsin(
+            lambda_2
+            * np.sin(item)
+            / np.sqrt(lambda_1**2 * np.cos(item) ** 2 + lambda_2**2 * np.sin(item) ** 2)
+        )
+        for item in initial_thetas
+    ]
