@@ -10,6 +10,7 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import scipy as sp
 import copy
 import time
 import os
@@ -189,7 +190,7 @@ def restructure_PBC_data(pbc_edges, pbc_nodes, pbc_incidence_matrix, L):
 
 
 def produce_data(L, density, p, seed, lambda_1, lambda_2):
-    Network = PBC_network.CreateNetwork(int(6.67 * density) * L**2, L, seed)
+    Network = PBC_network.CreateNetwork(int(5.637 * density) * L**2, L, seed)
 
     pbc_edges = Network[0][2]
     pbc_nodes = Network[1][2]
@@ -287,6 +288,8 @@ def produce_data(L, density, p, seed, lambda_1, lambda_2):
 
     return (
         p,
+        density,
+        seed,
         lambda_1,
         lambda_2,
         chi,
@@ -302,6 +305,8 @@ def produce_data(L, density, p, seed, lambda_1, lambda_2):
 
 def produce_and_save_plots(
     p,
+    density,
+    seed,
     lambda_1,
     lambda_2,
     chi,
@@ -320,7 +325,7 @@ def produce_and_save_plots(
     i = 0
 
     axs_min[0, 2].hist(reference_stretches[i], bins=100, density=True)
-    axs_min[0, 2].hist(predicted_stretches[0], bins=100, alpha=0.8, color="orange", density=True)
+    axs_min[0, 2].hist(predicted_stretches[i], bins=100, alpha=0.8, color="orange", density=True)
     axs_min[0, 2].set_xlabel(r"$\lambda_a$", fontsize=13)
     axs_min[0, 2].set_ylabel(r"$p(\lambda_a)$")
     axs_min[0, 2].legend(["Numerical results", "Affine prediction"])
@@ -453,6 +458,6 @@ def produce_and_save_plots(
         "$(p,\lambda_1,\lambda_2) = ({},{},{})$".format(p, lambda_1[1], lambda_2[1]), fontsize=40
     )
 
-    fig_min.savefig("subplots_min_p{}.pdf".format(p))
-    fig_max.savefig("subplots_max_p{}.pdf".format(p))
+    fig_min.savefig("subplots_min_p{}_d{}_s{}.pdf".format(p, density, seed))
+    fig_max.savefig("subplots_max_p{}_d{}_s{}.pdf".format(p, density, seed))
     return

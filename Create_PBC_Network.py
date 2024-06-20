@@ -182,7 +182,7 @@ def Createnetwork(
                 other_line_index = line_index + reference_line_index + 1
                 intersections.append([reference_line_index, other_line_index])
                 crosslink_coordinates.append(intersection_line(reference_line, other_line))
-                # FIGURE OUT THE ORDER HERE!
+                # FIGURE OUT THE ORDER HERE?
 
     # boundary_nodes = []
     # boundary_indices = []
@@ -205,4 +205,34 @@ def Createnetwork(
         for element in item:
             intersection_sets.append(set([2 * element, index + 2 * len(lines)]))
             intersection_sets.append(set([2 * element + 1, index + 2 * len(lines)]))
-    return (lines, intersections, crosslink_coordinates)
+
+    # Here is where we then figure out all the new lines
+    edges = []
+    num_intersections = 1
+    for index in range(len(intersections)):
+        if num_intersections > 1:
+            num_intersections -= 1
+            continue
+        item = intersections[index]
+        try:
+            while item[0] == intersections[index + num_intersections][0]:
+                num_intersections += 1
+        except IndexError:
+            pass
+        print(index, item[0], num_intersections)
+        distances = [
+            np.linalg.norm(lines[item[0]][0] - crosslink_coordinates[intersections[index + i][1]])
+            for i in range(num_intersections)
+        ]
+        coord_store = [
+            crosslink_coordinates[intersections[index + i][1]] for i in range(num_intersections)
+        ]
+        for item in coord_store:
+
+            edges.append(
+                np.array[
+                    lines[item[0]][0],
+                ]
+            )
+
+    return (lines, intersections, crosslink_coordinates, edges)

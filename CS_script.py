@@ -85,18 +85,40 @@ def test():
     return (new_data, network_data, energy_data)
 
 
-(L, density, p, seed, lambda_1, lambda_2) = (
-    sys.argv[1],
-    sys.argv[2],
-    sys.argv[3],
-    sys.argv[4],
-    sys.argv[1],
-    sys.argv[1],
+L = 2
+
+(
+    p,
+    density,
+    seed,
+    lambda_1,
+    lambda_2,
+    chi,
+    chi_def,
+    reference_stretches,
+    predicted_stretches,
+    predicted_stretches_deformed,
+    initial_theta,
+    current_thetas,
+    predicted_orientations,
+) = Make_plots.produce_data(2, 10, 1, 0, [1.2, 2], [1, 1])
+
+
+output_data = (
+    p,
+    density,
+    seed,
+    lambda_1,
+    lambda_2,
+    chi,
+    chi_def,
+    reference_stretches,
+    predicted_stretches,
+    predicted_stretches_deformed,
+    initial_theta,
+    current_thetas,
+    predicted_orientations,
 )
-
-output_data = Make_plots.produce_data(L, density, p, seed, lambda_1, lambda_2)
-
-# output_data = test()
 
 
 with open("Test_data.dat", "wb") as f:

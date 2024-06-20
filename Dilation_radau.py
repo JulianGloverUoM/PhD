@@ -14,6 +14,7 @@ file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
 import PBC_network  # noqa
 import scipy as sp
+import scipy.stats as stats
 
 #############################################################################
 #############################################################################
@@ -783,3 +784,43 @@ def affine_theta_calc(lambda_1, lambda_2, initial_thetas):
         )
         for item in initial_thetas
     ]
+
+
+def stretch_prediction_gamma(k, theta, lambda_1, lambda_2, min_stretch, max_stretch):
+    lambda_inputs = np.linspace(min_stretch - 0.05, max_stretch, 10000)
+    output = []
+    alpha = k - 1
+    e = np.exp(1)
+    for L in lambda_inputs:
+        integrand = lambda x: (
+            e ** (alpha * np.log((L * e) / (x * alpha * theta)) - L / (x * theta))
+            / (
+                np.sqrt(2 * np.pi * alpha * theta**2)
+                * np.sqrt((lambda_1**2 - x**2) * (x**2 - lambda_2**2))
+            )
+        )
+        output.append(
+            sp.integrate.quadrature(integrand, lambda_2, lambda_1, tol=1.49e-08, rtol=1.49e-08)[0]
+        )
+    return np.array(output)
+
+
+def stretch_prediction_lognorm(mu, sigma, lambda_1, lambda_2, min_stretch, max_stretch):
+
+    lambda_inputs = np.linspace(min_stretch - 0.05, max_stretch, 10000)
+    output = []
+    for L in lambda_inputs:
+        integrand = lambda x: (
+            x
+            * np.exp(-((np.log(L / x) - mu) ** 2) / (2 * sigma**2))
+            / (
+                L
+                * sigma
+                * np.sqrt(2 * np.pi)
+                * np.sqrt((lambda_1**2 - x**2) * (x**2 - lambda_2**2))
+            )
+        )
+        output.append(
+            sp.integrate.quadrature(integrand, lambda_2, lambda_1, tol=1.49e-08, rtol=1.49e-08)[0]
+        )
+    return output
