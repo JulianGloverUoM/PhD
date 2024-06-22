@@ -515,7 +515,7 @@ def Realisation_dilation(
 
     stresses = []
 
-    Network = PBC_network.CreateNetwork(density * L**2, L, seed)
+    Network = PBC_network.CreateNetwork(int(5.637 * density) * L**2, L, seed)
 
     pbc_edges = Network[0][2]
     pbc_nodes = Network[1][2]

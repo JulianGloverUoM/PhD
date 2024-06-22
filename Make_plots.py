@@ -300,6 +300,7 @@ def produce_data(L, density, p, seed, lambda_1, lambda_2):
         initial_theta,
         current_thetas,
         predicted_orientations,
+        data,
     )
 
 

@@ -85,39 +85,27 @@ def test():
     return (new_data, network_data, energy_data)
 
 
-L = 2
+(L, density, seed, p, max_lambda_1, max_lambda_2, num_steps) = (2, 10, 0, 0.9, 2, 1.5, 10)
 
-(
-    p,
-    density,
-    seed,
-    lambda_1,
-    lambda_2,
-    chi,
-    chi_def,
-    reference_stretches,
-    predicted_stretches,
-    predicted_stretches_deformed,
-    initial_theta,
-    current_thetas,
-    predicted_orientations,
-) = Make_plots.produce_data(2, 10, 1, 0, [1.2, 2], [1, 1])
+# (
+#     p,
+#     density,
+#     seed,
+#     lambda_1,
+#     lambda_2,
+#     chi,
+#     chi_def,
+#     reference_stretches,
+#     predicted_stretches,
+#     predicted_stretches_deformed,
+#     initial_theta,
+#     current_thetas,
+#     predicted_orientations,
+# ) = Make_plots.produce_data(2, 10, 1, 0, [1.2, 2], [1, 1])
 
 
-output_data = (
-    p,
-    density,
-    seed,
-    lambda_1,
-    lambda_2,
-    chi,
-    chi_def,
-    reference_stretches,
-    predicted_stretches,
-    predicted_stretches_deformed,
-    initial_theta,
-    current_thetas,
-    predicted_orientations,
+output_data = Dilation_radau.Realisation_dilation(
+    L, density, seed, p, max_lambda_1, max_lambda_2, num_steps, False, False
 )
 
 
