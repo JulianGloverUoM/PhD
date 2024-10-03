@@ -1222,8 +1222,8 @@ def PlotNetwork_2(nodes, incidence_matrix, L, shear_factor):
 
     plt.gca().set_aspect("equal")
 
-    plt.title(str(r"$\gamma$ = {}".format(shear_factor)))
-    # plt.savefig(".pdf")
+    # plt.title(str(r"$\gamma$ = {}".format(shear_factor)))
+    plt.savefig("generated_network_example_2.pdf")
     return
 
 
@@ -1364,7 +1364,7 @@ def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initia
     cpick.set_array([])
     fig = plt.figure()
     plt.title(str(r"$\lambda_1,\lambda_2$ = {},{}".format(lambda_1, lambda_2)))
-    # plt.gca().set_aspect("equal")
+    plt.gca().set_aspect("equal")
 
     new_edges = []
     for row in incidence_matrix:
@@ -1393,6 +1393,6 @@ def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initia
         cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
         boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
     )
-    plt.savefig("prestress_example2.pdf")
+    plt.savefig("prestress_network_deformed_equilibrium_example.pdf")
 
     return

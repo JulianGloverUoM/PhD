@@ -1,5 +1,7 @@
 # Uses RK23 method to run biaxial stretch deformation on network
 
+# Look at using numba package.
+
 ######################################
 import numpy as np
 import matplotlib as mpl
@@ -15,6 +17,7 @@ sys.path.append(file_path)
 import PBC_network  # noqa
 import scipy as sp
 import scipy.stats as stats
+from datetime import date
 
 #############################################################################
 #############################################################################
@@ -185,10 +188,9 @@ def calculate_stress_strain_stretch(
     data, lambda_1_step, lambda_2_step, num_steps, L, fibre_lengths_multiplier
 ):
     flag_non_zero_initial_stretch = 0
-    if fibre_lengths_multiplier == 1:
+    if fibre_lengths_multiplier != 1:
         flag_non_zero_initial_stretch = 1
     num_intervals = len(data)
-
     force_top = []
 
     force_bot = []
@@ -211,8 +213,14 @@ def calculate_stress_strain_stretch(
     force_left_sum = [np.sum(item, axis=0) for item in force_left]
     force_right_sum = [np.sum(item, axis=0) for item in force_right]
 
-    p_top = -np.stack(np.array(force_top_sum), axis=0) / L
-    p_bot = np.stack(np.array(force_bot_sum), axis=0) / L
+    if not flag_non_zero_initial_stretch:
+        force_top_sum = [np.array([0, 0])] + force_top_sum
+        force_bot_sum = [np.array([0, 0])] + force_bot_sum
+        force_left_sum = [np.array([0, 0])] + force_left_sum
+        force_right_sum = [np.array([0, 0])] + force_right_sum
+
+    p_top = -np.stack(np.array(force_top_sum), axis=0)
+    p_bot = np.stack(np.array(force_bot_sum), axis=0)
     p_left = -np.stack(np.array(force_left_sum), axis=0)
     p_right = -np.stack(np.array(force_right_sum), axis=0)
 
@@ -224,8 +232,8 @@ def calculate_stress_strain_stretch(
         L_y = L * (1 + i * lambda_2_step) + flag_non_zero_initial_stretch * lambda_2_step * L
         p_top[i] = p_top[i] / L_x
         p_bot[i] = p_bot[i] / L_x
-        p_left[i] = np.array([[0, -1], [1, 0]]).dot(p_left[i]) / L_y
-        p_right[i] = np.array([[0, 1], [-1, 0]]).dot(p_right[i]) / L_y
+        p_left[i] = np.array([[0, 1], [-1, 0]]).dot(p_left[i]) / L_y
+        p_right[i] = np.array([[0, -1], [1, 0]]).dot(p_right[i]) / L_y
 
     return (
         [force_top, force_bot, force_left, force_right],
@@ -510,8 +518,8 @@ def Realisation_dilation(
 ):
     data = []
 
-    lambda_1_step = (max_lambda_1 - 1) / num_steps
-    lambda_2_step = (max_lambda_2 - 1) / num_steps
+    lambda_1_step = (max_lambda_1 - 1) / (num_steps - 1)
+    lambda_2_step = (max_lambda_2 - 1) / (num_steps - 1)
 
     stresses = []
 
@@ -576,48 +584,83 @@ def Realisation_dilation(
     if Plot_stress_results:
         lambda_1 = np.linspace(1, max_lambda_1, num_steps)
         lambda_2 = np.linspace(1, max_lambda_2, num_steps)
-        if fibre_lengths_multiplier == 1:
-            lambda_1 = np.linspace(1 + lambda_1_step, max_lambda_1, num_steps)
-            lambda_1 = np.linspace(1 + lambda_2_step, max_lambda_2, num_steps)
+        if max_lambda_1 == 1:
+            lambda_1 = lambda_2
+        if max_lambda_2 == 1:
+            lambda_2 = lambda_1
+
         plt.figure()
 
-        plt.plot(lambda_1, p_top[:, 0])
+        plt.plot(lambda_2, p_top[:, 0])
         plt.plot(lambda_1, p_top[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
         plt.title("Top boundary")
-        # plt.savefig("Prestress_05_top.pdf")
+        plt.savefig(
+            "Stress_strain_top_d{}_p{}_s{}_L1{}_L2{}.png".format(
+                density, fibre_lengths_multiplier, seed, max_lambda_1, max_lambda_2
+            )
+        )
 
         plt.figure()
 
-        plt.plot(lambda_1, p_bot[:, 0])
+        plt.plot(lambda_2, p_bot[:, 0])
         plt.plot(lambda_1, p_bot[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
         plt.title("Bottom boundary")
-        # plt.savefig("Prestress_05_bot.pdf")
+        plt.savefig(
+            "Stress_strain_top_d{}_p{}_s{}_L1{}_L2{}.png".format(
+                density, fibre_lengths_multiplier, seed, max_lambda_1, max_lambda_2
+            )
+        )
 
         plt.figure()
 
-        plt.plot(lambda_2, p_left[:, 0])
+        plt.plot(lambda_1, p_left[:, 0])
         plt.plot(lambda_2, p_left[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
         plt.title("Left boundary")
-        # plt.savefig("Prestress_05_left.pdf")
+        plt.savefig(
+            "Stress_strain_top_d{}_p{}_s{}_L1{}_L2{}.png".format(
+                density, fibre_lengths_multiplier, seed, max_lambda_1, max_lambda_2
+            )
+        )
 
         plt.figure()
 
-        plt.plot(lambda_2, p_right[:, 0])
+        plt.plot(lambda_1, p_right[:, 0])
         plt.plot(lambda_2, p_right[:, 1])
         plt.xlabel("Strain")
         plt.ylabel("Stress")
         plt.legend(["Shear Stress", "Normal Stress"])
         plt.title("Right boundary")
-        # plt.savefig("Prestress_05_right.pdf")
+        plt.savefig(
+            "Stress_strain_top_d{}_p{}_s{}_L1{}_L2{}.png".format(
+                density, fibre_lengths_multiplier, seed, max_lambda_1, max_lambda_2
+            )
+        )
+    with open(
+        "Dilation_radau_realisations/realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_".format(
+            L,
+            density,
+            seed,
+            fibre_lengths_multiplier,
+            max_lambda_1,
+            max_lambda_2,
+            num_steps,
+            Plot_stress_results,
+            Plot_networks,
+        )
+        + str(date.today())
+        + ".dat",
+        "wb",
+    ) as f:
+        pickle.dump((data, [p_top, p_bot, p_left, p_right]), f)
     return (data, [p_top, p_bot, p_left, p_right])
 
 
@@ -761,6 +804,10 @@ def chi_undeformed(stretches, orientations, lambda_1, lambda_2):
     return output
 
 
+def chi_prestressed(stretches, orientations, lambda_1, lambda_2, initial_stretches):
+    return chi_undeformed(stretches, orientations, lambda_1, lambda_2) * initial_stretches
+
+
 def chi_deformed(stretches, orientations, lambda_1, lambda_2):
     output = []
     for i, item in enumerate(orientations):
@@ -792,7 +839,7 @@ def stretch_prediction_gamma(k, theta, lambda_1, lambda_2, min_stretch, max_stre
     alpha = k - 1
     e = np.exp(1)
     for L in lambda_inputs:
-        integrand = lambda x: (
+        integrand = lambda x: (2 / np.pi) * (
             e ** (alpha * np.log((L * e) / (x * alpha * theta)) - L / (x * theta))
             / (
                 np.sqrt(2 * np.pi * alpha * theta**2)
@@ -810,7 +857,7 @@ def stretch_prediction_lognorm(mu, sigma, lambda_1, lambda_2, min_stretch, max_s
     lambda_inputs = np.linspace(min_stretch - 0.05, max_stretch, 10000)
     output = []
     for L in lambda_inputs:
-        integrand = lambda x: (
+        integrand = lambda x: (2 / np.pi) * (
             x
             * np.exp(-((np.log(L / x) - mu) ** 2) / (2 * sigma**2))
             / (
@@ -824,3 +871,66 @@ def stretch_prediction_lognorm(mu, sigma, lambda_1, lambda_2, min_stretch, max_s
             sp.integrate.quadrature(integrand, lambda_2, lambda_1, tol=1.49e-08, rtol=1.49e-08)[0]
         )
     return output
+
+
+def stretch_prediction_st(shape_st, loc_st, scale_st, lambda_1, lambda_2, min_stretch, max_stretch):
+
+    lambda_inputs = np.linspace(min_stretch - 0.05, max_stretch, 10000)
+    output = []
+    for L in lambda_inputs:
+        integrand = lambda x: (
+            2
+            * sp.special.gamma((shape_st + 1) / 2)
+            / (sp.special.gamma((shape_st) / 2) * np.pi * scale_st)
+        ) * (
+            [1 + ((L / x - loc_st) / scale_st) ** 2 / shape_st] ** (-(shape_st + 1) / 2)
+            / (
+                np.sqrt(np.pi * shape_st)
+                * np.sqrt((lambda_1**2 - x**2) * (x**2 - lambda_2**2))
+            )
+        )
+
+        output.append(
+            sp.integrate.quadrature(integrand, lambda_2, lambda_1, tol=1.49e-08, rtol=1.49e-08)[0]
+        )
+    return output
+
+
+def Spline_derivative_plot(input_data, strains, knots, derivative_order, data_name):
+    input_spl = sp.interpolate.UnivariateSpline(strains, input_data, k=knots)
+    plt.figure()
+    plt.plot(strains, input_data, "ro")
+    plt.plot(strains, input_spl(strains))
+    plt.xlabel(r"$\lambda_2$")
+    plt.ylabel(data_name)
+    # plt.savefig("sigma_yy_p09_biaxial.pdf")
+
+    plt.show()
+    input_spl_deriv = input_spl.derivative(n=derivative_order)
+    plt.figure()
+    derivs = input_spl_deriv(strains)
+    plt.plot(strains, derivs)
+    plt.plot(strains, derivs, "ko")
+    plt.xlabel(r"$\lambda_2$")
+    plt.ylabel("Order {} derivative of {}".format(derivative_order, data_name))
+    # plt.savefig("deriv_sigma_yy_p09_biaxial.pdf")
+    return
+
+
+def discrete_stress(nodes, incidence_matrix, initial_lengths, L):
+    edge_vectors = incidence_matrix.dot(nodes)
+
+    normalised_edges = normalise_elements(edge_vectors)
+
+    l_j = vector_of_magnitudes(edge_vectors)
+
+    F_j = (l_j - initial_lengths) / initial_lengths
+
+    sigma = np.matrix([[0, 0], [0, 0]])
+
+    for index in range(len(initial_lengths)):
+        sigma = sigma + F_j[index] * l_j[index] * np.outer(
+            normalised_edges[index], normalised_edges[index]
+        )
+
+    return sigma / (L**2)

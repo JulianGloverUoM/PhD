@@ -85,29 +85,41 @@ def test():
     return (new_data, network_data, energy_data)
 
 
-(L, density, seed, p, max_lambda_1, max_lambda_2, num_steps) = (2, 10, 0, 0.9, 2, 1.5, 10)
-
-# (
-#     p,
-#     density,
-#     seed,
-#     lambda_1,
-#     lambda_2,
-#     chi,
-#     chi_def,
-#     reference_stretches,
-#     predicted_stretches,
-#     predicted_stretches_deformed,
-#     initial_theta,
-#     current_thetas,
-#     predicted_orientations,
-# ) = Make_plots.produce_data(2, 10, 1, 0, [1.2, 2], [1, 1])
-
-
-output_data = Dilation_radau.Realisation_dilation(
-    L, density, seed, p, max_lambda_1, max_lambda_2, num_steps, False, False
+(L, density, seed, p, max_lambda_1, max_lambda_2, num_steps) = (
+    2,
+    10,
+    0,
+    1,
+    2,
+    1,
+    11,
 )
 
+Network = PBC_network.CreateNetwork(int(5.637 * density) * L**2, L, seed)
 
-with open("Test_data.dat", "wb") as f:
-    pickle.dump(output_data, f)
+pbc_edges = Network[0][2]
+pbc_nodes = Network[1][2]
+pbc_incidence_matrix = Network[2][1]
+
+(
+    nodes,
+    edges,
+    incidence_matrix,
+    boundary_nodes,
+    top_nodes,
+    bot_nodes,
+    left_nodes,
+    right_nodes,
+) = Dilation_radau.restructure_PBC_data(pbc_edges, pbc_nodes, pbc_incidence_matrix, L)
+
+# print("Initial fiber lengths multiplier = ", fibre_lengths_multiplier)
+
+initial_lengths = p * Dilation_radau.vector_of_magnitudes(incidence_matrix.dot(nodes))
+
+# output_data = Dilation_radau.Realisation_dilation(
+#     L, density, seed, p, max_lambda_1, max_lambda_2, num_steps, True, True
+# )
+
+
+# with open("output_data_23_06_2024_p1_uniaxial.dat", "wb") as f:
+#     pickle.dump(output_data, f)
