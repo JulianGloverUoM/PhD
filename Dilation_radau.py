@@ -526,6 +526,7 @@ def Realisation_dilation(
     Plot_stress_results,
     Plot_networks,
 ):
+    realisation_start_time = time.time()
     data = []
 
     lambda_1_step = (max_lambda_1 - 1) / (num_steps - 1)
@@ -583,7 +584,7 @@ def Realisation_dilation(
             1 + lambda_2_step * i,
         )
 
-    print("Total Computational time = ", time.time() - total_time)
+    print("Total Deformation Computational time = ", time.time() - total_time)
 
     (p_top, p_bot, p_left, p_right) = calculate_stress_strain_stretch(
         data, lambda_1_step, lambda_2_step, num_steps, L, fibre_lengths_multiplier
@@ -671,6 +672,8 @@ def Realisation_dilation(
         "wb",
     ) as f:
         pickle.dump((data, [p_top, p_bot, p_left, p_right]), f)
+
+    print("Total Realisation time =", time.time() - realisation_start_time)
     return (data, [p_top, p_bot, p_left, p_right], (nodes, initial_lengths, incidence_matrix))
 
 
