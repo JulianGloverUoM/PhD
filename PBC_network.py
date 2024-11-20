@@ -1385,8 +1385,8 @@ def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initia
     )
     ax = plt.gca()
 
-    plt.xlim(0 - 0.1 * L, 1.1 * lambda_1 * L)
-    plt.ylim(0 - 0.1 * L, 1.1 * lambda_2 * L)
+    # plt.xlim(0 - 0.1 * L, 1.1 * lambda_1 * L)
+    # plt.ylim(0 - 0.1 * L, 1.1 * lambda_2 * L)
 
     plt.colorbar(
         cpick,

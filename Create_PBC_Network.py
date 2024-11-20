@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Script to generate a PBC network with data structure in compliance with rerquirements for solving
 # for equilibrium positions using dispersive energy ODE method.
 
@@ -10,9 +12,17 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcol
 import matplotlib.cm as cm
+import scipy as sp
+import scipy.stats as stats
+from datetime import date
 import copy
-
 import time
+import os
+import sys
+import pickle
+
+file_path = os.path.realpath(__file__)
+sys.path.append(file_path)
 
 #############################################################################
 #############################################################################
@@ -24,6 +34,10 @@ def ccw(A, B, C):
 
 def intersect(A, B, C, D):
     return ccw(A, C, D) != ccw(B, C, D) and ccw(A, B, C) != ccw(A, B, D)
+
+
+def slope(A, B):
+    return (A[1] - B[1]) / (A[0] - B[0])
 
 
 #############################################################################
@@ -156,6 +170,32 @@ def apply_pbc(node_1, node_2, L):
 #############################################################################
 #############################################################################
 
+# Normalises the rows of an array
+
+
+def normalise_elements(input_array):
+    return np.array(
+        [(np.array(vector) / np.sqrt(np.einsum("i,i", vector, vector))) for vector in input_array]
+    )
+
+
+# Takes in a array and outputs the magnitudes of the rows in the array
+
+
+def vector_of_magnitudes(input_array):
+    return np.array([np.sqrt(np.einsum("i,i", vector, vector)) for vector in input_array])
+
+
+# Computes the forbenius norm of a matrix, more efficient than inbuilt np.linalg.norm function
+
+
+def frobenius_norm(input_array):
+    return np.sqrt(np.einsum("ij,ij", input_array, input_array))
+
+
+#############################################################################
+#############################################################################
+
 
 def Create_pbc_Network(
     L,
@@ -175,12 +215,13 @@ def Create_pbc_Network(
 
     for i in range(N):  # generate a bunch of line segements under PBC
         line = random_edge_uniform(L)
+        original_line = copy.deepcopy(line)
+
         line = apply_pbc(line[0], line[1], L)
-        if len(line) > 2:
+        if line != original_line:
             for j in range(len(line)):
                 line_is_on_boundary.append(1)
         else:
-            line_is_on_boundary.append(0)
             line_is_on_boundary.append(0)
 
         lines = lines + line
@@ -192,8 +233,8 @@ def Create_pbc_Network(
     intersections_ordering = []  # order of when lines intersect with eachother
 
     crosslink_coordinates = []
-    num_intersections_per_edge = []
-    cumsum_num_intersections_per_edge = []
+    num_intersections_per_line = []
+    cumsum_num_intersections_per_line = [0]
 
     for i in range(len(lines)):
         intersections.append([])
@@ -205,14 +246,18 @@ def Create_pbc_Network(
 
     for (current_line_index, current_line) in enumerate(lines):
 
+        current_node = current_line[0]
+
         flag_intersection_with_previous_line = 0
         added_nodes = []
 
         if len(intersections[current_line_index]) != 0:
             flag_intersection_with_previous_line = 1
             added_nodes = [item for item in intersections[current_line_index] if item[0] > item[1]]
-
-        current_node = current_line[0]
+            for item in crosslink_coordinates[current_line_index]:
+                intersections_ordering[current_line_index].append(
+                    np.linalg.norm(current_node - item)
+                )
 
         # Run intersection check over other elements of the list ignoring duplicates
 
@@ -243,12 +288,11 @@ def Create_pbc_Network(
                 intersections_ordering[current_line_index].append(
                     np.linalg.norm(current_node - crosslink)
                 )
-                intersections_ordering[current_line_index + line_index + 1].append(
-                    np.linalg.norm(current_node - crosslink)
-                )
 
-        num_intersections_per_edge.append(len(intersections[current_line_index]))
-        cumsum_num_intersections_per_edge.append(sum(num_intersections_per_edge))
+        num_intersections_per_line.append(
+            len([item for item in intersections[current_line_index] if item[0] < item[1]])
+        )
+        cumsum_num_intersections_per_line.append(sum(num_intersections_per_line))
 
         # Use the list of crosslink distances to determine the order of the crosslinks
         # Goes (start of line, crosslink 1, crosslink 2, ......, crosslink N, end of line)
@@ -270,17 +314,11 @@ def Create_pbc_Network(
         # start_index = 2*current_line_index, and end_index = 2*current_line_index+1
 
         if len(intersections[current_line_index]) == 0:
-            edges.append(current_line)
-            unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
-            unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index + 1])
-
-            # Check if the edge is incident with the boundary, and store that information
-
             if line_is_on_boundary[current_line_index]:
-                edge_is_on_boundary.append([1])
-            else:
-                edge_is_on_boundary.append([0])
-
+                edges.append(current_line)
+                unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
+                unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index + 1])
+                edge_is_on_boundary.append(1)
         else:
 
             # Case where crosslink nodes have not allready been added to list of nodes
@@ -288,19 +326,19 @@ def Create_pbc_Network(
                 coordinates_list = crosslink_coordinates[current_line_index]
                 # The first edge
 
-                edges.append(np.array([current_line[0], coordinates_list[0]]))
-
                 # Check if the edge is incident with the boundary, and store that information
 
+                edges.append(np.array([current_line[0], coordinates_list[0]]))
+                unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
+                unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
+
                 if line_is_on_boundary[current_line_index] and any(
-                    [any(np.mod(item, L) == 0) for item in edges[-1]]
+                    [any(np.mod(item, L) == 0) for item in [current_line[0], coordinates_list[0]]]
                 ):
                     edge_is_on_boundary.append(1)
                 else:
                     edge_is_on_boundary.append(0)
 
-                unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
-                unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
                 nodes.append(coordinates_list[0])
 
                 # Loop over all the edges made of incident crosslinks
@@ -309,26 +347,25 @@ def Create_pbc_Network(
                     edges.append(np.array([coordinates_list[i], coordinates_list[i + 1]]))
                     edge_is_on_boundary.append(0)
 
+                    unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) - 1])
                     unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
-                    unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) + 1])
 
                     nodes.append(coordinates_list[i + 1])
 
                 # The final edge
 
                 edges.append(np.array([coordinates_list[-1], current_line[1]]))
-
+                unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index + 1])
+                unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) - 1])
                 # Check if the edge is incident with the boundary, and store that information
 
                 if line_is_on_boundary[current_line_index] and any(
-                    [any(np.mod(item, L) == 0) for item in edges[-1]]
+                    [any(np.mod(item, L) == 0) for item in [coordinates_list[-1], current_line[1]]]
                 ):
+
                     edge_is_on_boundary.append(1)
                 else:
                     edge_is_on_boundary.append(0)
-
-                unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
-                unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
 
             else:  # Case where crosslink nodes have allready been added to list of nodes
                 coordinates_list = crosslink_coordinates[current_line_index]
@@ -340,28 +377,32 @@ def Create_pbc_Network(
                     item_rev = copy.copy(item)
                     item_rev.reverse()
 
-                    index = cumsum_num_intersections_per_edge[item[1] - 1] + intersections[
-                        item[1]
-                    ].index(item_rev)
+                    item_index = intersections[item[1]].index(item_rev)
 
-                    added_nodes_indices.append(index + 2 * len(lines))
+                    index = cumsum_num_intersections_per_line[item[1]] + item_index
+
+                    index_discount_for_added_nodes = len(
+                        [elem for elem in intersections[item[1]][:item_index] if elem[0] > elem[1]]
+                    )
+
+                    added_nodes_indices.append(
+                        index + 2 * len(lines) - index_discount_for_added_nodes
+                    )
 
                 # The first edge
 
                 edges.append(np.array([current_line[0], coordinates_list[0]]))
 
-                # Check if the edge is incident with the boundary, and store that information
-
-                if line_is_on_boundary[current_line_index] and any(
-                    [any(np.mod(item, L) == 0) for item in edges[-1]]
-                ):
-                    edge_is_on_boundary.append(1)
-                else:
-                    edge_is_on_boundary.append(0)
-
-                if added_nodes[0] == intersections[current_line_index][0]:
+                if intersections[current_line_index][0] in added_nodes:
                     unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
-                    unsigned_incidence_matrix_list.append([len(edges) - 1, added_nodes_indices[0]])
+                    unsigned_incidence_matrix_list.append(
+                        [
+                            len(edges) - 1,
+                            added_nodes_indices[
+                                added_nodes.index(intersections[current_line_index][0])
+                            ],
+                        ]
+                    )
 
                 else:
                     unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
@@ -369,18 +410,20 @@ def Create_pbc_Network(
 
                     nodes.append(coordinates_list[0])
 
+                # Check if the edge is incident with the boundary, and store that information
+
+                if line_is_on_boundary[current_line_index] and any(
+                    [any(np.mod(item, L) == 0) for item in [current_line[0], coordinates_list[0]]]
+                ):
+
+                    edge_is_on_boundary.append(1)
+                else:
+                    edge_is_on_boundary.append(0)
+
                 # Loop over all the edges made of incident crosslinks
                 for i in range(len(coordinates_list) - 1):
                     edges.append(np.array([coordinates_list[i], coordinates_list[i + 1]]))
-
-                    # Check if the edge is incident with the boundary, and store that information
-
-                    if line_is_on_boundary[current_line_index] and any(
-                        [any(np.mod(item, L) == 0) for item in edges[-1]]
-                    ):
-                        edge_is_on_boundary.append(1)
-                    else:
-                        edge_is_on_boundary.append(0)
+                    edge_is_on_boundary.append(0)
 
                     index_node_1 = None
                     index_node_2 = None
@@ -409,98 +452,152 @@ def Create_pbc_Network(
                         nodes.append(coordinates_list[i + 1])
 
                     elif index_node_2 is not None:
-                        unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
+                        unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) - 1])
                         unsigned_incidence_matrix_list.append([len(edges) - 1, index_node_2])
 
                     else:
+                        unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) - 1])
                         unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
-                        unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) + 1])
                         nodes.append(coordinates_list[i + 1])
 
                 # The final edge
 
                 edges.append(np.array([coordinates_list[-1], current_line[1]]))
 
+                if intersections[current_line_index][-1] in added_nodes:
+                    unsigned_incidence_matrix_list.append(
+                        [len(edges) - 1, 2 * current_line_index + 1]
+                    )
+                    unsigned_incidence_matrix_list.append(
+                        [
+                            len(edges) - 1,
+                            added_nodes_indices[
+                                added_nodes.index(intersections[current_line_index][-1])
+                            ],
+                        ]
+                    )
+
+                else:
+                    unsigned_incidence_matrix_list.append(
+                        [len(edges) - 1, 2 * current_line_index + 1]
+                    )
+                    unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes) - 1])
+
                 # Check if the edge is incident with the boundary, and store that information
 
                 if line_is_on_boundary[current_line_index] and any(
-                    [any(np.mod(item, L) == 0) for item in edges[-1]]
+                    [any(np.mod(item, L) == 0) for item in [coordinates_list[-1], current_line[1]]]
                 ):
+
                     edge_is_on_boundary.append(1)
                 else:
                     edge_is_on_boundary.append(0)
 
-                if added_nodes[-1] == intersections[current_line_index][-1]:
-                    unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
-                    unsigned_incidence_matrix_list.append([len(edges) - 1, added_nodes_indices[-1]])
+    incidence_matrix = np.zeros((len(edges), len(nodes)))
+    for i in range(len(edges)):
+        index_1 = unsigned_incidence_matrix_list[2 * i]
+        index_2 = unsigned_incidence_matrix_list[2 * i + 1]
+        incidence_matrix[index_1[0]][index_1[1]] = 1
+        incidence_matrix[index_2[0]][index_2[1]] = -1
 
+    boundary_index_list = []
+    for i, node in enumerate(nodes):
+        if any([abs(item - 0) <= 1e-15 for item in node]) or any(
+            [abs(item - L) <= 1e-15 for item in node]
+        ):
+            edge_index = np.nonzero(incidence_matrix[:, i])[0][0]
+            boundary_index_list.append([i, edge_index])
+    boundary_index_list = np.array(boundary_index_list)
+
+    edge_corrections = np.zeros((np.shape(incidence_matrix)[0], 2))
+
+    boundary_edge_count = 0
+    while 2 * boundary_edge_count < len(boundary_index_list):
+        if (2 * boundary_edge_count + 2) < len(boundary_index_list) and (
+            boundary_index_list[2 * boundary_edge_count + 1][1]
+            == boundary_index_list[2 * boundary_edge_count + 2][1]
+        ):
+            edge_1, edge_2, edge_3 = (
+                boundary_index_list[2 * boundary_edge_count][1],
+                boundary_index_list[2 * boundary_edge_count + 1][1],
+                boundary_index_list[2 * boundary_edge_count + 3][1],
+            )
+            for item in np.nonzero(incidence_matrix[edge_1, :])[0]:
+                if item != boundary_index_list[2 * boundary_edge_count][1]:
+                    node_1 = item
+            for item in np.nonzero(incidence_matrix[edge_3, :])[0]:
+                if item != boundary_index_list[2 * boundary_edge_count + 3][1]:
+                    node_2 = item
+            incidence_matrix[edge_1, :] = 0
+            incidence_matrix[edge_2, :] = 0
+            incidence_matrix[edge_3, :] = 0
+            incidence_matrix[edge_1][node_1] = 1
+            incidence_matrix[edge_1][node_2] = -1
+            if slope(nodes[node_1], nodes[node_2]) > 0:
+                if np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + L) <= 1:
+                    edge_corrections[edge_1] = L
                 else:
-                    unsigned_incidence_matrix_list.append([len(edges) - 1, 2 * current_line_index])
-                    unsigned_incidence_matrix_list.append([len(edges) - 1, len(nodes)])
+                    edge_corrections[edge_1] = -L
+            elif np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + [L, -L]) <= 1:
+                edge_corrections[edge_1] = [L, -L]
+            else:
+                edge_corrections[edge_1] = [-L, L]
+            boundary_edge_count += 2
+        else:
+            edge_1, edge_2 = (
+                boundary_index_list[2 * boundary_edge_count][1],
+                boundary_index_list[2 * boundary_edge_count + 1][1],
+            )
+            for item in np.nonzero(incidence_matrix[edge_1, :])[0]:
+                if item != boundary_index_list[2 * boundary_edge_count][1]:
+                    node_1 = item
+            for item in np.nonzero(incidence_matrix[edge_2, :])[0]:
+                if item != boundary_index_list[2 * boundary_edge_count + 1][1]:
+                    node_2 = item
+            incidence_matrix[edge_1, :] = 0
+            incidence_matrix[edge_2, :] = 0
+            incidence_matrix[edge_1][node_1] = 1
+            incidence_matrix[edge_1][node_2] = -1
+            crossed_boundary_index = (
+                np.where(
+                    nodes[boundary_index_list[2 * boundary_edge_count][0]]
+                    - nodes[boundary_index_list[2 * boundary_edge_count + 1][0]]
+                    == 0
+                )[0][0]
+                - 1
+            )
+            edge_corrections[edge_1][crossed_boundary_index] = L
+            if (
+                not np.linalg.norm(
+                    incidence_matrix[edge_1, :].dot(nodes) + edge_corrections[edge_1]
+                )
+                <= 1
+            ):
+                edge_corrections[edge_1] = -1 * edge_corrections[edge_1]
+            boundary_edge_count += 1
 
-    # for (line_index, line) in lines:
-    #     if len(intersections[line_index]) == 0:
-    #         edges.append(line)
-    #     else:
-    #         coordinates_list = (
-    #             [line[0]] + [item for item in crosslink_coordinates[line_index]] + line[1]
-    #         )
-    #         for i in range(len(coordinates_list) - 1):
-    #             edges.append(np.array([coordinates_list[i], coordinates_list[i + 1]]))
-    #         for item in coordinates_list:
-    #             nodes.append(item)
+    boundary_index_list_reverse = list(copy.deepcopy(boundary_index_list))
 
-    # boundary_nodes = []
-    # boundary_indices = []
-    # for (i, entry) in enumerate(lines):
-    #     for (j, element) in enumerate(entry):
-    #         if any(np.mod(element, L) <= 1e-15):
-    #             boundary_nodes.append(entry)
-    #             boundary_indices.append([i, j])
+    boundary_index_list_reverse.reverse()
 
-    # nodes_list = []  # We now create a list of all the nodes
-    # for item in lines:
-    #     nodes_list.append(item[0])
-    #     nodes_list.append(item[1])
+    for item in boundary_index_list_reverse:
+        del nodes[item[0]]
+        incidence_matrix = np.delete(incidence_matrix, item[0], axis=1)
 
-    # for item in crosslink_coordinates:
-    #     nodes_list.append(item)
+    trimming = True
 
-    # intersection_sets = []
-    # for (index, item) in enumerate(intersections):
-    #     for element in item:
-    #         intersection_sets.append(set([2 * element, index + 2 * len(lines)]))
-    #         intersection_sets.append(set([2 * element + 1, index + 2 * len(lines)]))
-
-    # # Here is where we then figure out all the new lines
-    # edges = []
-    # num_intersections = 1
-    # for index in range(len(intersections)):
-    #     if num_intersections > 1:
-    #         num_intersections -= 1
-    #         continue
-    #     item = intersections[index]
-    #     try:
-    #         while item[0] == intersections[index + num_intersections][0]:
-    #             num_intersections += 1
-    #     except IndexError:
-    #         pass
-    #     print(index, item[0], num_intersections)
-    #     distances = [
-    #         np.linalg.norm(lines[item[0]][0] - crosslink_coordinates[intersections[index + i][1]])
-    #         for i in range(num_intersections)
-    #     ]
-    #     coord_store = [
-    #         crosslink_coordinates[intersections[index + i][1]] for i in range(num_intersections)
-    #     ]
-    #     for item in coord_store:
-
-    #         edges.append(
-    #             np.array[
-    #                 lines[item[0]][0],
-    #             ]
-    #         )
-
+    while trimming:
+        (num_edges, num_nodes) = np.shape(incidence_matrix)
+        for node_index in range(num_nodes):
+            if len(np.nonzero(incidence_matrix[:, num_nodes - 1 - node_index])[0]) == 0:
+                incidence_matrix = np.delete(incidence_matrix, num_nodes - 1 - node_index, axis=1)
+                del nodes[num_nodes - 1 - node_index]
+        for edge_index in range(num_edges):
+            if len(np.nonzero(incidence_matrix[num_edges - 1 - edge_index, :])[0]) <= 1:
+                incidence_matrix = np.delete(incidence_matrix, num_edges - 1 - edge_index, axis=0)
+                edge_corrections = np.delete(edge_corrections, num_edges - 1 - edge_index, axis=0)
+        if (num_edges, num_nodes) == np.shape(incidence_matrix):
+            trimming = False
     return (
         lines,
         intersections,
@@ -511,21 +608,98 @@ def Create_pbc_Network(
         edges,
         line_is_on_boundary,
         edge_is_on_boundary,
+        incidence_matrix,
     )
 
 
-def PlotNetwork(lines, L):
-    fig_network = plt.figure()
+def ColormapPlot_PBC_dilation(
+    nodes, incidence_matrix, L, lambda_1, lambda_2, initial_lengths, edge_corrections
+):
+    strains = (
+        vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections) - 0.9 * initial_lengths
+    ) / initial_lengths
 
-    for segment in lines:
-        plt.plot([segment[0][0], segment[1][0]], [segment[0][1], segment[1][1]], color="b")
-
-    # Plot the box
-    plt.plot([0, L, L, 0, 0], [0, 0, L, L, 0])
-
-    plt.xlim(0 - 0.1 * L, 1.1 * L)
-    plt.ylim(0 - 0.1 * L, 1.1 * L)
-
+    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
+    cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
+    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
+    cpick.set_array([])
+    fig = plt.figure()
+    plt.title(str(r"$\lambda_1,\lambda_2$ = {},{}".format(lambda_1, lambda_2)))
     plt.gca().set_aspect("equal")
-    plt.show
+
+    plotting_edges = []
+    for row_index, row in enumerate(incidence_matrix):
+        row_corrections = edge_corrections[row_index]
+        if any(row_corrections):
+            node_1_index, node_2_index = np.nonzero(row)[0]
+            if node_1_index != 1:
+                node_1_index, node_2_index = node_2_index, node_2_index
+            node_1 = nodes[node_1_index] + row_corrections
+            node_2 = nodes[node_2_index]
+            if apply_pbc(node_1, node_2, L)[0] == [
+                node_1,
+                node_2,
+            ]:
+                node_1 = nodes[node_1_index]
+                node_2 = nodes[node_2_index] - row_corrections
+            plotting_edges.append(apply_pbc(node_1, node_2, L))
+        else:
+            node_1 = list(nodes[np.nonzero(row)[0][0]])
+            node_2 = list(nodes[np.nonzero(row)[0][1]])
+            plotting_edges.append([node_1, node_2])
+
+    for i, edge in enumerate(plotting_edges):
+        if type(edge[0][0]) == np.float64:
+            plt.plot(
+                [edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color=cpick.to_rgba(strains[i])
+            )
+        else:
+            for segment in edge:
+                plt.plot(
+                    [segment[0][0], segment[1][0]],
+                    [segment[0][1], segment[1][1]],
+                    color=cpick.to_rgba(strains[i]),
+                )
+
+    plt.plot(
+        [0, lambda_1 * L, lambda_1 * L, 0, 0],
+        [0, 0, lambda_2 * L, lambda_2 * L, 0],
+    )
+    ax = plt.gca()
+
+    # plt.xlim(0 - 0.1 * L, 1.1 * lambda_1 * L)
+    # plt.ylim(0 - 0.1 * L, 1.1 * lambda_2 * L)
+
+    plt.colorbar(
+        cpick,
+        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
+        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+    )
+    # plt.savefig("prestress_network_deformed_equilibrium_example.pdf")
+
     return
+
+
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+#############################################################################
+
+# Functions to
+
+#############################################################################
+#############################################################################
+
+# Applies homogenous stretch/dilation deformation to Nx2 array of N nodes
+
+
+def dilation_deformation(input_nodes, lambda_1, lambda_2):
+    return np.array([np.array([[lambda_1, 0], [0, lambda_2]]).dot(item) for item in input_nodes])
+
+
+def invert_dilation(input_nodes, lambda_1, lambda_2):
+    return np.array(
+        [np.array([[1 / lambda_1, 0], [0, 1 / lambda_2]]).dot(item) for item in input_nodes]
+    )

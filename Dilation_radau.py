@@ -249,6 +249,16 @@ def calculate_stress_strain_stretch(
 def Radau_timestepper_dilation(
     L, nodes, incidence_matrix, boundary_nodes, initial_lengths, lambda_1, lambda_2, Plot_networks
 ):
+    # def scipy_fun(t, y):
+    #     matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
+    #     l_j = sparse_incidence.dot(matrix_y)
+    #     l_j_hat = normalise_elements(l_j)
+    #     F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
+    #     product = np.einsum("ij,i->ij", l_j_hat, F_j)
+    #     f_jk = sparse_incidence_transpose.dot(product)
+    #     f_jk[boundary_nodes:] = 0
+    #     return -np.reshape(f_jk, 2 * np.shape(f_jk)[0], order="C")
+
     def scipy_fun(t, y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
         l_j = sparse_incidence.dot(matrix_y)
@@ -661,7 +671,7 @@ def Realisation_dilation(
         "wb",
     ) as f:
         pickle.dump((data, [p_top, p_bot, p_left, p_right]), f)
-    return (data, [p_top, p_bot, p_left, p_right])
+    return (data, [p_top, p_bot, p_left, p_right], (nodes, initial_lengths, incidence_matrix))
 
 
 # Jacobian calculation is identical to hessian excepting the df_i/dr_k elements when f_i==0 as a
