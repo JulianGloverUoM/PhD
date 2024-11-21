@@ -523,8 +523,8 @@ def Realisation_dilation(
     max_lambda_1,
     max_lambda_2,
     num_steps,
-    Plot_stress_results,
-    Plot_networks,
+    Plot_stress_results=False,
+    Plot_networks=False,
 ):
     realisation_start_time = time.time()
     data = []
@@ -656,7 +656,7 @@ def Realisation_dilation(
             )
         )
     with open(
-        "Dilation_radau_realisations/realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_".format(
+        "Dilation_radau_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_".format(
             L,
             density,
             seed,
@@ -671,9 +671,12 @@ def Realisation_dilation(
         + ".dat",
         "wb",
     ) as f:
-        pickle.dump((data, [p_top, p_bot, p_left, p_right]), f)
+        pickle.dump(
+            (data, [p_top, p_bot, p_left, p_right], (nodes, initial_lengths, incidence_matrix)), f
+        )
 
     print("Total Realisation time =", time.time() - realisation_start_time)
+
     return (data, [p_top, p_bot, p_left, p_right], (nodes, initial_lengths, incidence_matrix))
 
 
