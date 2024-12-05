@@ -4,6 +4,18 @@
 import os
 import sys
 import pickle
+import random
+import math
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcol
+import matplotlib.cm as cm
+import scipy as sp
+import scipy.stats as stats
+from datetime import date
+import copy
+import time
 
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
@@ -11,6 +23,7 @@ sys.path.append(file_path)
 # import Stretch_Radau  # noqa
 import PBC_network  # noqa
 import Dilation_radau  # noqa
+import Create_PBC_Network  # noqa
 
 # import Make_plots  # noqa
 
@@ -117,10 +130,20 @@ import Dilation_radau  # noqa
 
 # initial_lengths = p * Dilation_radau.vector_of_magnitudes(incidence_matrix.dot(nodes))
 
-output_data = Dilation_radau.Realisation_dilation(
-    L, density, seed, p, max_lambda_1, max_lambda_2, num_steps, True, True
-)
+# output_data = Dilation_radau.Realisation_dilation(
+#     L, density, seed, p, max_lambda_1, max_lambda_2, num_steps, True, True
+# )
+for i in range(5):
+    start_time = time.time()
+    L = 1 + i
+    Network = Create_PBC_Network.Create_pbc_Network(10, L, 0)
+    print("New code for L={}".format(L), time.time() - start_time)
 
+for i in range(5):
+    start_time = time.time()
+    L = 1 + i
+    Network = PBC_network.CreateNetwork(int(5.637 * (10) * L**2), L, 0)
+    print("Old code for L={}".format(L), time.time() - start_time)
 
 # with open("output_data_23_06_2024_p1_uniaxial.dat", "wb") as f:
 #     pickle.dump(output_data, f)

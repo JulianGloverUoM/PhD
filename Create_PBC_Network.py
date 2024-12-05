@@ -24,6 +24,9 @@ import pickle
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
 
+from scipy.sparse import lil_matrix
+
+
 #############################################################################
 #############################################################################
 
@@ -264,8 +267,8 @@ def Create_pbc_Network(
         for (line_index, other_line) in enumerate(lines[current_line_index + 1 :]):
             if intersect(current_line[0], current_line[1], other_line[0], other_line[1]):
 
-                # For efficiency we loop over i,j>i, and when line i intersects line j, we note that
-                # line j intersects line i in the appropriate place.
+                # For efficiency we loop over i,j>i, and when line i intersects line j, we record
+                # that line j intersects line i in the appropriate place.
 
                 # Find out which lines intersect each other and store pairs of indices
 
@@ -493,12 +496,18 @@ def Create_pbc_Network(
                 else:
                     edge_is_on_boundary.append(0)
 
-    incidence_matrix = np.zeros((len(edges), len(nodes)))
+    # Here we create the initial incidence matrix and set it up, although it contains boundary nodes.
+    incidence_matrix = lil_matrix((len(edges), len(nodes)))
     for i in range(len(edges)):
         index_1 = unsigned_incidence_matrix_list[2 * i]
         index_2 = unsigned_incidence_matrix_list[2 * i + 1]
-        incidence_matrix[index_1[0]][index_1[1]] = 1
-        incidence_matrix[index_2[0]][index_2[1]] = -1
+        incidence_matrix[index_1[0], index_1[1]] = 1
+        incidence_matrix[index_2[0], index_2[1]] = -1
+
+    # Now we loop over the nodes, determine which ones are on the boundary and find their associated
+    # edges and connections. We do this to then be able to alter the incidence matrix such that it
+    # is the matrix of the periodic structure, and identify boundary nodes that much be removed from
+    # the list.
 
     boundary_index_list = []
     for i, node in enumerate(nodes):
@@ -507,32 +516,56 @@ def Create_pbc_Network(
         ):
             edge_index = np.nonzero(incidence_matrix[:, i])[0][0]
             boundary_index_list.append([i, edge_index])
+
+    # We convert the boundary index list into a np.array for easier use in the following code.
     boundary_index_list = np.array(boundary_index_list)
 
+    # Now we generate the edge corections. We need this to be able to calculate correct edge vectors
+    # and edge lengths in a concise manner. The formula is l_j = A_jk.dot(r_k)+edge_corrections_j.
     edge_corrections = np.zeros((np.shape(incidence_matrix)[0], 2))
+
+    # Some boundary edges cross through one or two boundaries. Due to how the boundary edge list is
+    # structured, all the segements consiting an edge are next to each other in the list, so if an
+    # edge is made of 3 segments, we can simple add 3 to the boundary edge count, or two otherwise.
+    # If we instead looped over edges and assigned the value of our loop variable, bugs can occur.
 
     boundary_edge_count = 0
     while 2 * boundary_edge_count < len(boundary_index_list):
+        # This tests to see if the edge is made of 3 segments. The first check is there to make sure
+        # that if the last edge is made of 2 segments, an index error is not raised due to trying to
+        # access an element of the boundary_index_list that doesnt exist.
+        # Because the python "and" function is lazy, that means if the last boundary edge consists
+        # of only 2 segments, the first if statement fails, so the check after the "and" never gets
+        # called, and no index error is raised.
         if (2 * boundary_edge_count + 2) < len(boundary_index_list) and (
             boundary_index_list[2 * boundary_edge_count + 1][1]
             == boundary_index_list[2 * boundary_edge_count + 2][1]
         ):
+            # We assign the edges for readability.
             edge_1, edge_2, edge_3 = (
                 boundary_index_list[2 * boundary_edge_count][1],
                 boundary_index_list[2 * boundary_edge_count + 1][1],
                 boundary_index_list[2 * boundary_edge_count + 3][1],
             )
+            # We determine the nodes for the new edge.
             for item in np.nonzero(incidence_matrix[edge_1, :])[0]:
                 if item != boundary_index_list[2 * boundary_edge_count][1]:
                     node_1 = item
             for item in np.nonzero(incidence_matrix[edge_3, :])[0]:
                 if item != boundary_index_list[2 * boundary_edge_count + 3][1]:
                     node_2 = item
+
+            # We force the incidence matrix to have no entries where there used to be boundary
+            # segments, deleting the boundary edges. To avoid issues with changing indices, we do
+            # not delete the edges yet, these empty edges will be removed during a later step.
             incidence_matrix[edge_1, :] = 0
             incidence_matrix[edge_2, :] = 0
             incidence_matrix[edge_3, :] = 0
+            # We choose the first edge index to become the new edge index of the new boundary edge.
             incidence_matrix[edge_1][node_1] = 1
             incidence_matrix[edge_1][node_2] = -1
+            # This check makes sure that the edge corrections is right, there are 4 possibilities,
+            # for all the combinations of boundaries that the edge can cross, Left|Right and Top|Bot.
             if slope(nodes[node_1], nodes[node_2]) > 0:
                 if np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + L) <= 1:
                     edge_corrections[edge_1] = L
@@ -543,21 +576,32 @@ def Create_pbc_Network(
             else:
                 edge_corrections[edge_1] = [-L, L]
             boundary_edge_count += 2
+
         else:
+            # If a boundary edge consists of two segments, we run essentially the exact same code
+            # as in the previous if statement, but with just two edges.
+            # We assign the edges for readability.
             edge_1, edge_2 = (
                 boundary_index_list[2 * boundary_edge_count][1],
                 boundary_index_list[2 * boundary_edge_count + 1][1],
             )
+            # We determine the nodes for the new edge.
             for item in np.nonzero(incidence_matrix[edge_1, :])[0]:
                 if item != boundary_index_list[2 * boundary_edge_count][1]:
                     node_1 = item
             for item in np.nonzero(incidence_matrix[edge_2, :])[0]:
                 if item != boundary_index_list[2 * boundary_edge_count + 1][1]:
                     node_2 = item
+            # We force the incidence matrix to have no entries where there used to be boundary
+            # segments, deleting the boundary edges. To avoid issues with changing indices, we do
+            # not delete the edges yet, these empty edges will be removed during a later step.
             incidence_matrix[edge_1, :] = 0
             incidence_matrix[edge_2, :] = 0
+            # We choose the first edge index to become the new edge index of the new boundary edge.
             incidence_matrix[edge_1][node_1] = 1
             incidence_matrix[edge_1][node_2] = -1
+            # As there is only a single boundary that is crossed, we can determine exactly which one
+            # it is easily, and so can avoid the more complicated check of the 4 possibilities.
             crossed_boundary_index = (
                 np.where(
                     nodes[boundary_index_list[2 * boundary_edge_count][0]]
@@ -567,6 +611,8 @@ def Create_pbc_Network(
                 - 1
             )
             edge_corrections[edge_1][crossed_boundary_index] = L
+            # We assume we add L to the node (in the right coordinate), and if that results in a
+            # edge that is too long, that must mean we need to subtract it instead.
             if (
                 not np.linalg.norm(
                     incidence_matrix[edge_1, :].dot(nodes) + edge_corrections[edge_1]
@@ -574,41 +620,98 @@ def Create_pbc_Network(
                 <= 1
             ):
                 edge_corrections[edge_1] = -1 * edge_corrections[edge_1]
+
             boundary_edge_count += 1
+
+    # We make a copy of the boundary_index list, which we will then reverse. This is because the
+    # .reverse() function just reverses the list, so its safer to create a deepcopy and reverse that.
 
     boundary_index_list_reverse = list(copy.deepcopy(boundary_index_list))
 
     boundary_index_list_reverse.reverse()
 
+    # We are deleting items via the reversed list, as that preserves the indices of the earlier
+    # items in the incidence matrix and node array.
+
     for item in boundary_index_list_reverse:
         del nodes[item[0]]
-        incidence_matrix = np.delete(incidence_matrix, item[0], axis=1)
+        incidence_matrix.rows = [
+            np.delete(row, np.where(row == item[0])) for row in incidence_matrix.rows
+        ]
+        incidence_matrix.data = [
+            np.delete(data, np.where(row == item[0]))
+            for data, row in zip(incidence_matrix.data, incidence_matrix.rows)
+        ]
+    # In Trimming we remove any empty edges or dangling nodes we have not already identified. This
+    # could be done in a single pass of the incidence matrix, but as deleting an item may lead to a
+    # new item requiring deletion, its easier to just pass over the list multiple times.
+    # A technically more efficient code may be to identify and check if a edges deletion should
+    # result in new edges and nodes being deleted, but doing so would require some form of recursion,
+    # and the code would be more prone to bugs and harder to maintain.
+    # Instead we use a while loop, run over the incidence matrix, delete edges and nodes as they
+    # arise, and then loop over the incidence matrix repeated until nothing is deleted, then halts.
 
     trimming = True
 
     while trimming:
+        # We store the initial dimensions of the incidence matrix, the trimming will be done if
+        # the final matrix has the same dimensions as the initial one.
         (num_edges, num_nodes) = np.shape(incidence_matrix)
-        for node_index in range(num_nodes):
-            if len(np.nonzero(incidence_matrix[:, num_nodes - 1 - node_index])[0]) == 0:
-                incidence_matrix = np.delete(incidence_matrix, num_nodes - 1 - node_index, axis=1)
-                del nodes[num_nodes - 1 - node_index]
+
+        # First we delete all the edges that are empty (from the boundary conversion), or only have
+        # one node (from a previous trimming pass).
+        # We do the edges first, because we then need to reconstruct our matrix to take its
+        # transpose and then run the same edge deletion. This is because when we delete a row in
+        # the lil_matrix format, the number of rows in the incidence_matrix.rows data structure
+        # decreases. But there is no incidence_matrix.columns data, so to dynamically update the
+        # indices of the nodes to accopunt for deleted nodes, we have to work with the transposed
+        # matrices rows. This is all a consequence of using the sparse matrix format.
+
         for edge_index in range(num_edges):
-            if len(np.nonzero(incidence_matrix[num_edges - 1 - edge_index, :])[0]) <= 1:
-                incidence_matrix = np.delete(incidence_matrix, num_edges - 1 - edge_index, axis=0)
-                edge_corrections = np.delete(edge_corrections, num_edges - 1 - edge_index, axis=0)
+            current_edge_index = num_edges - 1 - edge_index
+            if len(incidence_matrix.rows[current_edge_index]) <= 1:
+                del incidence_matrix.rows[current_edge_index]
+                del incidence_matrix.data[current_edge_index]
+                edge_corrections = np.delete(edge_corrections, current_edge_index, axis=0)
+
+        # We not construct a new matrix, we have to manually contruct this otherwise we cannot take
+        # the transpose of the matrix.
+        num_rows = len(incidence_matrix.rows)
+        new_matrix = lil_matrix((num_rows, num_nodes))
+        for i in range(num_rows):
+            for j in range(len(incidence_matrix.data[i])):
+                new_matrix[i, incidence_matrix.rows[i][j]] = incidence_matrix.data[i][j]
+
+        incidence_matrix = copy.deepcopy(new_matrix.T)
+
+        # We now run over the transposed incidence matrix, and delete nodes as required.
+
+        for node_index in range(num_nodes):
+            current_node_index = num_nodes - 1 - node_index
+            if len(incidence_matrix.rows[current_node_index]) == 0:
+                incidence_matrix.rows = np.delete(incidence_matrix.rows, current_node_index, axis=0)
+                incidence_matrix.data = np.delete(incidence_matrix.data, current_node_index, axis=0)
+                del nodes[current_node_index]
+
+        # We again reconstruct the incidence matrix into a new lil_matrix form
+        num_columns = len(incidence_matrix.rows)
+        new_matrix = lil_matrix((num_columns, num_rows))
+        for i in range(num_columns):
+            for j in range(len(incidence_matrix.data[i])):
+                new_matrix[i, incidence_matrix.rows[i][j]] = incidence_matrix.data[i][j]
+
+        # And take its transpose
+        incidence_matrix = copy.deepcopy(new_matrix.T)
+
+        # Finally we check to see if the trimming has removed any data, if no, then halt.
         if (num_edges, num_nodes) == np.shape(incidence_matrix):
+            incidence_matrix_csr = incidence_matrix.tocsr()
             trimming = False
+
     return (
-        lines,
-        intersections,
-        intersections_ordering,
-        crosslink_coordinates,
         nodes,
-        unsigned_incidence_matrix_list,
-        edges,
-        line_is_on_boundary,
-        edge_is_on_boundary,
-        incidence_matrix,
+        edge_corrections,
+        incidence_matrix_csr,
     )
 
 
@@ -629,19 +732,19 @@ def ColormapPlot_PBC_dilation(
 
     plotting_edges = []
     for row_index, row in enumerate(incidence_matrix):
-        row_corrections = edge_corrections[row_index]
-        if any(row_corrections):
+        row_correction = edge_corrections[row_index]
+        if any(row_correction):
             node_1_index, node_2_index = np.nonzero(row)[0]
-            if node_1_index != 1:
-                node_1_index, node_2_index = node_2_index, node_2_index
-            node_1 = nodes[node_1_index] + row_corrections
+            if row[node_1_index] != 1:
+                node_1_index, node_2_index = node_2_index, node_1_index
+            node_1 = nodes[node_1_index] + row_correction
             node_2 = nodes[node_2_index]
             if apply_pbc(node_1, node_2, L)[0] == [
                 node_1,
                 node_2,
             ]:
                 node_1 = nodes[node_1_index]
-                node_2 = nodes[node_2_index] - row_corrections
+                node_2 = nodes[node_2_index] - row_correction
             plotting_edges.append(apply_pbc(node_1, node_2, L))
         else:
             node_1 = list(nodes[np.nonzero(row)[0][0]])
