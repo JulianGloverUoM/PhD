@@ -14,6 +14,7 @@ import matplotlib.colors as mcol
 import matplotlib.cm as cm
 import scipy as sp
 import scipy.stats as stats
+from scipy.sparse import lil_matrix
 from datetime import date
 import copy
 import time
@@ -23,8 +24,6 @@ import pickle
 
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
-
-from scipy.sparse import lil_matrix
 
 
 #############################################################################
@@ -194,6 +193,23 @@ def vector_of_magnitudes(input_array):
 
 def frobenius_norm(input_array):
     return np.sqrt(np.einsum("ij,ij", input_array, input_array))
+
+
+def trim_rows(matrix, min_nonzeros):
+    non_empty_rows = []
+    removed_indices = []
+
+    for i in range(matrix.shape[0]):
+        if len(matrix.rows[i]) >= min_nonzeros:
+            non_empty_rows.append(i)
+        else:
+            removed_indices.append(i)
+
+    new_matrix = lil_matrix((len(non_empty_rows), matrix.shape[1]))
+    for new_index, old_index in enumerate(non_empty_rows):
+        new_matrix.rows[new_index] = matrix.rows[old_index]
+        new_matrix.data[new_index] = matrix.data[old_index]
+    return new_matrix, removed_indices
 
 
 #############################################################################
@@ -623,25 +639,33 @@ def Create_pbc_Network(
 
             boundary_edge_count += 1
 
-    # We make a copy of the boundary_index list, which we will then reverse. This is because the
-    # .reverse() function just reverses the list, so its safer to create a deepcopy and reverse that.
+    # This is an initial trimming step, we seperate it from the loop as we know what nodes to delete
 
     boundary_index_list_reverse = list(copy.deepcopy(boundary_index_list))
 
     boundary_index_list_reverse.reverse()
 
-    # We are deleting items via the reversed list, as that preserves the indices of the earlier
-    # items in the incidence matrix and node array.
-
+    deleted_nodes = []
     for item in boundary_index_list_reverse:
         del nodes[item[0]]
-        incidence_matrix.rows = [
-            np.delete(row, np.where(row == item[0])) for row in incidence_matrix.rows
-        ]
-        incidence_matrix.data = [
-            np.delete(data, np.where(row == item[0]))
-            for data, row in zip(incidence_matrix.data, incidence_matrix.rows)
-        ]
+        deleted_nodes.append(item[0])
+
+    deleted_nodes = set(deleted_nodes)
+
+    num_edges = len(incidence_matrix.rows)
+    num_nodes = len(nodes)
+    new_matrix = lil_matrix((num_nodes, num_edges))
+
+    incidence_matrix_transpose = copy.deepcopy(incidence_matrix.T)
+
+    for i in range(num_nodes):
+        if i not in deleted_nodes:
+            for j in range(len(incidence_matrix_transpose.data[i])):
+                new_matrix[
+                    i, incidence_matrix_transpose.rows[i][j]
+                ] = incidence_matrix_transpose.data[i][j]
+
+    incidence_matrix = copy.deepcopy(new_matrix.T)
     # In Trimming we remove any empty edges or dangling nodes we have not already identified. This
     # could be done in a single pass of the incidence matrix, but as deleting an item may lead to a
     # new item requiring deletion, its easier to just pass over the list multiple times.
@@ -650,61 +674,29 @@ def Create_pbc_Network(
     # and the code would be more prone to bugs and harder to maintain.
     # Instead we use a while loop, run over the incidence matrix, delete edges and nodes as they
     # arise, and then loop over the incidence matrix repeated until nothing is deleted, then halts.
-
     trimming = True
-
     while trimming:
-        # We store the initial dimensions of the incidence matrix, the trimming will be done if
-        # the final matrix has the same dimensions as the initial one.
-        (num_edges, num_nodes) = np.shape(incidence_matrix)
+        # Save initial shape
+        initial_shape = incidence_matrix.shape
 
-        # First we delete all the edges that are empty (from the boundary conversion), or only have
-        # one node (from a previous trimming pass).
-        # We do the edges first, because we then need to reconstruct our matrix to take its
-        # transpose and then run the same edge deletion. This is because when we delete a row in
-        # the lil_matrix format, the number of rows in the incidence_matrix.rows data structure
-        # decreases. But there is no incidence_matrix.columns data, so to dynamically update the
-        # indices of the nodes to accopunt for deleted nodes, we have to work with the transposed
-        # matrices rows. This is all a consequence of using the sparse matrix format.
+        # Step 1: Trim dangle or empty edges
+        incidence_matrix, removed_edges = trim_rows(incidence_matrix, min_nonzeros=2)
+        for edge_index in reversed(removed_edges):
+            edge_corrections = np.delete(edge_corrections, edge_index, axis=0)
+        # Step 2: Transpose
+        incidence_matrix = incidence_matrix.T
 
-        for edge_index in range(num_edges):
-            current_edge_index = num_edges - 1 - edge_index
-            if len(incidence_matrix.rows[current_edge_index]) <= 1:
-                del incidence_matrix.rows[current_edge_index]
-                del incidence_matrix.data[current_edge_index]
-                edge_corrections = np.delete(edge_corrections, current_edge_index, axis=0)
+        # Step 3: Trim rows (columns of original matrix) with less than 1 non-zero entry
+        incidence_matrix, removed_nodes = trim_rows(incidence_matrix, min_nonzeros=1)
 
-        # We not construct a new matrix, we have to manually contruct this otherwise we cannot take
-        # the transpose of the matrix.
-        num_rows = len(incidence_matrix.rows)
-        new_matrix = lil_matrix((num_rows, num_nodes))
-        for i in range(num_rows):
-            for j in range(len(incidence_matrix.data[i])):
-                new_matrix[i, incidence_matrix.rows[i][j]] = incidence_matrix.data[i][j]
+        for node_index in reversed(removed_nodes):
+            del nodes[node_index]
 
-        incidence_matrix = copy.deepcopy(new_matrix.T)
+        # Step 4: Transpose back
+        incidence_matrix = incidence_matrix.T
 
-        # We now run over the transposed incidence matrix, and delete nodes as required.
-
-        for node_index in range(num_nodes):
-            current_node_index = num_nodes - 1 - node_index
-            if len(incidence_matrix.rows[current_node_index]) == 0:
-                incidence_matrix.rows = np.delete(incidence_matrix.rows, current_node_index, axis=0)
-                incidence_matrix.data = np.delete(incidence_matrix.data, current_node_index, axis=0)
-                del nodes[current_node_index]
-
-        # We again reconstruct the incidence matrix into a new lil_matrix form
-        num_columns = len(incidence_matrix.rows)
-        new_matrix = lil_matrix((num_columns, num_rows))
-        for i in range(num_columns):
-            for j in range(len(incidence_matrix.data[i])):
-                new_matrix[i, incidence_matrix.rows[i][j]] = incidence_matrix.data[i][j]
-
-        # And take its transpose
-        incidence_matrix = copy.deepcopy(new_matrix.T)
-
-        # Finally we check to see if the trimming has removed any data, if no, then halt.
-        if (num_edges, num_nodes) == np.shape(incidence_matrix):
+        # Check if dimensions have changed
+        if incidence_matrix.shape == initial_shape:
             incidence_matrix_csr = incidence_matrix.tocsr()
             trimming = False
 
