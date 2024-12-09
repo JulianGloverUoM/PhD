@@ -530,7 +530,7 @@ def Create_pbc_Network(
         if any([abs(item - 0) <= 1e-15 for item in node]) or any(
             [abs(item - L) <= 1e-15 for item in node]
         ):
-            edge_index = np.nonzero(incidence_matrix[:, i])[0][0]
+            edge_index = incidence_matrix.T.rows[i][0]
             boundary_index_list.append([i, edge_index])
 
     # We convert the boundary index list into a np.array for easier use in the following code.
@@ -564,33 +564,37 @@ def Create_pbc_Network(
                 boundary_index_list[2 * boundary_edge_count + 3][1],
             )
             # We determine the nodes for the new edge.
-            for item in np.nonzero(incidence_matrix[edge_1, :])[0]:
+            for item in incidence_matrix.rows[edge_1]:
                 if item != boundary_index_list[2 * boundary_edge_count][1]:
                     node_1 = item
-            for item in np.nonzero(incidence_matrix[edge_3, :])[0]:
+            for item in incidence_matrix.rows[edge_3]:
                 if item != boundary_index_list[2 * boundary_edge_count + 3][1]:
                     node_2 = item
 
             # We force the incidence matrix to have no entries where there used to be boundary
             # segments, deleting the boundary edges. To avoid issues with changing indices, we do
             # not delete the edges yet, these empty edges will be removed during a later step.
-            incidence_matrix[edge_1, :] = 0
-            incidence_matrix[edge_2, :] = 0
-            incidence_matrix[edge_3, :] = 0
+            incidence_matrix.rows[edge_2] = []
+            incidence_matrix.data[edge_2] = []
+            incidence_matrix.rows[edge_3] = []
+            incidence_matrix.data[edge_3] = []
             # We choose the first edge index to become the new edge index of the new boundary edge.
-            incidence_matrix[edge_1][node_1] = 1
-            incidence_matrix[edge_1][node_2] = -1
+            incidence_matrix.rows[edge_1] = [node_1, node_2]
+            incidence_matrix.data[edge_1] = [1, -1]
             # This check makes sure that the edge corrections is right, there are 4 possibilities,
             # for all the combinations of boundaries that the edge can cross, Left|Right and Top|Bot.
-            if slope(nodes[node_1], nodes[node_2]) > 0:
-                if np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + L) <= 1:
-                    edge_corrections[edge_1] = L
+            try:
+                if slope(nodes[node_1], nodes[node_2]) > 0:
+                    if np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + L) <= 1:
+                        edge_corrections[edge_1] = L
+                    else:
+                        edge_corrections[edge_1] = -L
+                elif np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + [L, -L]) <= 1:
+                    edge_corrections[edge_1] = [L, -L]
                 else:
-                    edge_corrections[edge_1] = -L
-            elif np.linalg.norm(incidence_matrix[edge_1, :].dot(nodes) + [L, -L]) <= 1:
-                edge_corrections[edge_1] = [L, -L]
-            else:
-                edge_corrections[edge_1] = [-L, L]
+                    edge_corrections[edge_1] = [-L, L]
+            except:
+                print(nodes[node_1], nodes[node_2])
             boundary_edge_count += 2
 
         else:
@@ -602,20 +606,22 @@ def Create_pbc_Network(
                 boundary_index_list[2 * boundary_edge_count + 1][1],
             )
             # We determine the nodes for the new edge.
-            for item in np.nonzero(incidence_matrix[edge_1, :])[0]:
+            for item in incidence_matrix.rows[edge_1]:
                 if item != boundary_index_list[2 * boundary_edge_count][1]:
                     node_1 = item
-            for item in np.nonzero(incidence_matrix[edge_2, :])[0]:
+            for item in incidence_matrix.rows[edge_2]:
                 if item != boundary_index_list[2 * boundary_edge_count + 1][1]:
                     node_2 = item
             # We force the incidence matrix to have no entries where there used to be boundary
             # segments, deleting the boundary edges. To avoid issues with changing indices, we do
             # not delete the edges yet, these empty edges will be removed during a later step.
-            incidence_matrix[edge_1, :] = 0
-            incidence_matrix[edge_2, :] = 0
+            incidence_matrix.rows[edge_1] = []
+            incidence_matrix.data[edge_1] = []
+            incidence_matrix.rows[edge_2] = []
+            incidence_matrix.data[edge_2] = []
             # We choose the first edge index to become the new edge index of the new boundary edge.
-            incidence_matrix[edge_1][node_1] = 1
-            incidence_matrix[edge_1][node_2] = -1
+            incidence_matrix.rows[edge_1] = [node_1, node_2]
+            incidence_matrix.data[edge_1] = [1, -1]
             # As there is only a single boundary that is crossed, we can determine exactly which one
             # it is easily, and so can avoid the more complicated check of the 4 possibilities.
             crossed_boundary_index = (
@@ -705,6 +711,9 @@ def Create_pbc_Network(
         edge_corrections,
         incidence_matrix_csr,
     )
+
+
+# doesnt work
 
 
 def ColormapPlot_PBC_dilation(
