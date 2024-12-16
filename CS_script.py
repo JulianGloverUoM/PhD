@@ -30,3 +30,7 @@ import Dilation_PBC  # noqa
 
 L = sys.argv[1]
 density = sys.argv[2]
+p = sys.argv[3]
+seed = sys.argv[4]
+
+Dilation_PBC.Realisation_dilation(L, density, seed, p, 1.5, 1.5, 11)

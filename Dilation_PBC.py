@@ -74,12 +74,11 @@ def Radau_timestepper_PBC(
     edge_corrections,
     lambda_1,
     lambda_2,
-    # Plot_networks,
 ):
     # This function defines the right hand side of the ODE system, we pass t into the function as it
     # is required by the scipy package we are using, however it has no affect on the output.
     def scipy_fun(t, y):
-        matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
+        matrix_y = np.reshape(y, (incidence_matrix.shape[1], 2))
         l_j = incidence_matrix.dot(matrix_y)
         l_j_hat = normalise_elements(l_j)
         F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
@@ -89,7 +88,7 @@ def Radau_timestepper_PBC(
 
     # Calulates the total elastic energy within the network.
     def energy_calc(y):
-        matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
+        matrix_y = np.reshape(y, (incidence_matrix.shape[1], 2))
         l_j = incidence_matrix.dot(matrix_y)
         u_j = vector_of_magnitudes(l_j) - initial_lengths
         return 0.5 * np.matmul(1 / initial_lengths, np.square(u_j))
@@ -104,8 +103,8 @@ def Radau_timestepper_PBC(
     # This jacobian can be passed to the radau timestepper to potentially improve its performance,
     # although testing has showed for the networks this script works on the jacobian reduces performance.
     def jacobian(y):
-        matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-        num_edges, num_nodes = np.shape(incidence_matrix)
+        matrix_y = np.reshape(y, (incidence_matrix.shape[1], 2))
+        num_edges, num_nodes = incidence_matrix.shape
         edge_vectors = incidence_matrix.dot(matrix_y) + edge_corrections
         edge_lengths = vector_of_magnitudes(edge_vectors)
         edge_vectors_normalised = normalise_elements(edge_vectors)
@@ -141,7 +140,7 @@ def Radau_timestepper_PBC(
     # gives the sparsity structure of the Hessian without having to do the (relatively) expensive
     # computation. Passing this structure to the timestepper dramatically improves performance
     def jac_sparsity_structure(y):
-        num_edges, num_nodes = np.shape(incidence_matrix)
+        num_edges, num_nodes = incidence_matrix.shape
         hessian = lil_matrix((2 * num_nodes, 2 * num_nodes))
         for edge in range(num_edges):
             i, k = incidence_matrix[edge, :].nonzero()[1]
@@ -156,7 +155,7 @@ def Radau_timestepper_PBC(
     # Inside the timestepper we do calculations with just the sparse version of the incidence
     # matrix to improve performance. Outside of the timestepper we do not as the structure is
     # harder to work with and manipulate.
-    incidence_matrix_transpose = copy.deepcopy(np.transpose(incidence_matrix))
+    incidence_matrix_transpose = copy.deepcopy(incidence_matrix.T)
 
     y_values = []
     t_values = []
@@ -251,14 +250,14 @@ def Radau_timestepper_PBC(
                 break
 
     ###############
-    t_vals = [0] + t_values
-    energy_values = [energy_calc(y)]
-    norm_values = [np.linalg.norm(scipy_fun(None, y))]
-    for i in range(np.shape(y_values)[0]):
-        energy_values.append(energy_calc(y_values[i]))
-        norm_values.append(np.linalg.norm(scipy_fun(None, y_values[i])))
+    # t_vals = [0] + t_values
+    # energy_values = [energy_calc(y)]
+    # norm_values = [np.linalg.norm(scipy_fun(None, y))]
+    # for i in range(np.shape(y_values)[0]):
+    #     energy_values.append(energy_calc(y_values[i]))
+    #     norm_values.append(np.linalg.norm(scipy_fun(None, y_values[i])))
 
-    y_output = np.reshape(y_values[-1], (np.shape(incidence_matrix)[1], 2))
+    y_output = np.reshape(y_values[-1], (incidence_matrix.shape[1], 2))
     # if Plot_networks:
     #     try:
     #         Create_PBC_network.ColormapPlot_dilation(
@@ -267,12 +266,15 @@ def Radau_timestepper_PBC(
     #     except IndexError or ZeroDivisionError or ValueError:
     #         pass
 
-    return (
-        t_vals,
-        norm_values,
-        y_output,
-        energy_values,
-    )
+    return y_output
+
+
+# (
+#         t_vals,
+#         norm_values,
+#         y_output,
+#         energy_values,
+#     )
 
 
 def Realisation_dilation(
@@ -323,7 +325,7 @@ def Realisation_dilation(
         )
         # Each step we provide a guess for the solution at the next step using the previous solution
         input_nodes = invert_dilation(
-            data[i - flag_skipped_first_computation][-2],
+            data[i - flag_skipped_first_computation],
             1 + lambda_1_step * i,
             1 + lambda_2_step * i,
         )
@@ -350,4 +352,4 @@ def Realisation_dilation(
 
     print("Total Realisation time =", time.time() - realisation_start_time)
 
-    return (data, (nodes, initial_lengths, incidence_matrix))
+    return (data, (nodes, edge_corrections, incidence_matrix))
