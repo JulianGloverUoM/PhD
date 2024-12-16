@@ -185,13 +185,10 @@ def Radau_timestepper_PBC(
         while True:
             # get y_new step state
             sol.step()
-            t_values.append(sol.t)
-            y_values.append(sol.y)
 
             # break loop after modeling is finished
             if sol.status == "finished":
-                # print("Norm after t = ", i + 1)
-                # print(np.linalg.norm(scipy_fun(None, sol.y)))
+                y_values.append(sol.y)
                 break
         if energy_calc(y_values[-1]) > energy_calc(y_input):
             print("energy increasing")

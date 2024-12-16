@@ -713,9 +713,6 @@ def Create_pbc_Network(
     )
 
 
-# doesnt work
-
-
 def ColormapPlot_PBC_dilation(
     nodes, incidence_matrix, L, lambda_1, lambda_2, initial_lengths, edge_corrections
 ):
