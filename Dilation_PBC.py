@@ -79,7 +79,7 @@ def Radau_timestepper_PBC(
     # is required by the scipy package we are using, however it has no affect on the output.
     def scipy_fun(t, y):
         matrix_y = np.reshape(y, (incidence_matrix.shape[1], 2))
-        l_j = incidence_matrix.dot(matrix_y)
+        l_j = incidence_matrix.dot(matrix_y) + edge_corrections
         l_j_hat = normalise_elements(l_j)
         F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
         product = np.einsum("ij,i->ij", l_j_hat, F_j)
@@ -89,7 +89,7 @@ def Radau_timestepper_PBC(
     # Calulates the total elastic energy within the network.
     def energy_calc(y):
         matrix_y = np.reshape(y, (incidence_matrix.shape[1], 2))
-        l_j = incidence_matrix.dot(matrix_y)
+        l_j = incidence_matrix.dot(matrix_y) + edge_corrections
         u_j = vector_of_magnitudes(l_j) - initial_lengths
         return 0.5 * np.matmul(1 / initial_lengths, np.square(u_j))
 
@@ -292,12 +292,14 @@ def Realisation_dilation(
     lambda_2_step = (max_lambda_2 - 1) / (num_steps - 1)
 
     (nodes, edge_corrections, incidence_matrix) = Create_PBC_Network.Create_pbc_Network(
-        density, L, seed
+        L, density, seed
     )
 
     # print("Initial fiber lengths multiplier = ", fibre_lengths_multiplier)
 
-    initial_lengths = fibre_lengths_multiplier * vector_of_magnitudes(incidence_matrix.dot(nodes))
+    initial_lengths = fibre_lengths_multiplier * vector_of_magnitudes(
+        incidence_matrix.dot(nodes) + edge_corrections
+    )
 
     # initial_lengths[10] = 1.5 * initial_lengths[10]
 
@@ -350,3 +352,32 @@ def Realisation_dilation(
     print("Total Realisation time =", time.time() - realisation_start_time)
 
     return (data, (nodes, edge_corrections, incidence_matrix))
+
+
+#############################################################################
+#############################################################################
+#############################################################################
+
+
+def Orientation_distribution(nodes, edge_corrections, incidence_matrix):
+    edge_vectors = incidence_matrix.dot(nodes) + edge_corrections
+    lengths = vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections)
+    orientations_output = []
+    for i in range(len(edge_vectors)):
+        orientations_output.append(
+            np.mod(np.arccos(edge_vectors[i][0] / np.linalg.norm(edge_vectors[i])), np.pi)
+        )
+    return orientations_output
+
+
+def lambda_a_calc(orientation, lambda_1, lambda_2):
+    return np.sqrt(
+        lambda_1**2 * np.cos(orientation) ** 2 + lambda_2**2 * np.sin(orientation) ** 2
+    )
+
+
+def lambda_p_calc(stretches, orientations, lambda_1, lambda_2):
+    output = []
+    for i, item in enumerate(orientations):
+        output.append(stretches[i] / lambda_a_calc(item, lambda_1, lambda_2))
+    return output
