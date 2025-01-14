@@ -109,7 +109,7 @@ def intersection_line(Q, P):
 
 def intersection_boundary(node_1, node_2, L):
     # Random orientations chosen such that the initial y coordinate is always below the end y
-    #  coordinate so here we only check if we intersect the top of the boundary for the y coordinate
+    # coordinate so here we only check if we intersect the top of the boundary for the y coordinate
     if intersect(node_1, node_2, [0, L], [L, L]):
         # skip divide by zero errors
         try:
@@ -118,6 +118,20 @@ def intersection_boundary(node_1, node_2, L):
                 return [node_1[0] + (L - node_1[1]) / m, L]
         except ZeroDivisionError:
             pass
+
+    # In generation we do not need to check for intersection with the bottom boundary, however, to
+    # plot the networks we will need to check for intersections with the bottom boundary and so
+    # include the below check.
+
+    if node_1[1] != 0 and intersect(node_1, node_2, [0, 0], [L, 0]):
+        # skip divide by zero errors
+        try:
+            m = (node_2[1] - node_1[1]) / (node_2[0] - node_1[0])
+            if node_2[0] != 0:
+                return [node_1[0] - (node_1[1] / m), 0]
+        except ZeroDivisionError:
+            pass
+
     x_intercept = None
     # intersection with x = 0 boundary
     if intersect(node_1, node_2, [0, 0], [0, L]):
@@ -556,6 +570,8 @@ def Create_pbc_Network(
         if (2 * boundary_edge_count + 2) < len(boundary_index_list) and (
             boundary_index_list[2 * boundary_edge_count + 1][1]
             == boundary_index_list[2 * boundary_edge_count + 2][1]
+            or boundary_index_list[2 * boundary_edge_count + 1][1]
+            == boundary_index_list[2 * boundary_edge_count + 3][1]
         ):
             # We assign the edges for readability.
             edge_1, edge_2, edge_3 = (
@@ -565,10 +581,10 @@ def Create_pbc_Network(
             )
             # We determine the nodes for the new edge.
             for item in incidence_matrix.rows[edge_1]:
-                if item != boundary_index_list[2 * boundary_edge_count][1]:
+                if item != boundary_index_list[2 * boundary_edge_count][0]:
                     node_1 = item
             for item in incidence_matrix.rows[edge_3]:
-                if item != boundary_index_list[2 * boundary_edge_count + 3][1]:
+                if item != boundary_index_list[2 * boundary_edge_count + 3][0]:
                     node_2 = item
 
             # We force the incidence matrix to have no entries where there used to be boundary
@@ -607,10 +623,10 @@ def Create_pbc_Network(
             )
             # We determine the nodes for the new edge.
             for item in incidence_matrix.rows[edge_1]:
-                if item != boundary_index_list[2 * boundary_edge_count][1]:
+                if item != boundary_index_list[2 * boundary_edge_count][0]:
                     node_1 = item
             for item in incidence_matrix.rows[edge_2]:
-                if item != boundary_index_list[2 * boundary_edge_count + 1][1]:
+                if item != boundary_index_list[2 * boundary_edge_count + 1][0]:
                     node_2 = item
             # We force the incidence matrix to have no entries where there used to be boundary
             # segments, deleting the boundary edges. To avoid issues with changing indices, we do
@@ -656,22 +672,6 @@ def Create_pbc_Network(
         del nodes[item[0]]
         deleted_nodes.append(item[0])
 
-    deleted_nodes = set(deleted_nodes)
-
-    num_edges = len(incidence_matrix.rows)
-    num_nodes = len(nodes)
-    new_matrix = lil_matrix((num_nodes, num_edges))
-
-    incidence_matrix_transpose = copy.deepcopy(incidence_matrix.T)
-
-    for i in range(num_nodes):
-        if i not in deleted_nodes:
-            for j in range(len(incidence_matrix_transpose.data[i])):
-                new_matrix[
-                    i, incidence_matrix_transpose.rows[i][j]
-                ] = incidence_matrix_transpose.data[i][j]
-
-    incidence_matrix = copy.deepcopy(new_matrix.T)
     # In Trimming we remove any empty edges or dangling nodes we have not already identified. This
     # could be done in a single pass of the incidence matrix, but as deleting an item may lead to a
     # new item requiring deletion, its easier to just pass over the list multiple times.
@@ -681,6 +681,7 @@ def Create_pbc_Network(
     # Instead we use a while loop, run over the incidence matrix, delete edges and nodes as they
     # arise, and then loop over the incidence matrix repeated until nothing is deleted, then halts.
     trimming = True
+    flag_not_first_trim = 0
     while trimming:
         # Save initial shape
         initial_shape = incidence_matrix.shape
@@ -695,17 +696,34 @@ def Create_pbc_Network(
         # Step 3: Trim rows (columns of original matrix) with less than 1 non-zero entry
         incidence_matrix, removed_nodes = trim_rows(incidence_matrix, min_nonzeros=1)
 
-        for node_index in reversed(removed_nodes):
-            del nodes[node_index]
+        if not flag_not_first_trim:
+            print("\n")
+            print("In removed, not deleted")
+            for node in removed_nodes:
+                if node not in deleted_nodes:
+                    print(node)
+            print("\n")
+            print("In deleted, not removed")
+            for node in reversed(list(deleted_nodes)):
+                if node not in set(removed_nodes):
+                    print(node)
+
+        if flag_not_first_trim:
+            for node_index in reversed(removed_nodes):
+                del nodes[node_index]
 
         # Step 4: Transpose back
         incidence_matrix = incidence_matrix.T
-
         # Check if dimensions have changed
-        if incidence_matrix.shape == initial_shape:
+        if incidence_matrix.shape == initial_shape and flag_not_first_trim:
             incidence_matrix_csr = incidence_matrix.tocsr()
             trimming = False
+        flag_not_first_trim += 1
 
+    # lengths = vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections)
+    # for i, item in enumerate(edge_corrections):
+    #     if lengths[i] > L:
+    #         edge_corrections[i] = -1 * edge_corrections[i]
     return (
         nodes,
         edge_corrections,
@@ -717,7 +735,7 @@ def ColormapPlot_PBC_dilation(
     nodes, incidence_matrix, L, lambda_1, lambda_2, initial_lengths, edge_corrections
 ):
     strains = (
-        vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections) - 0.9 * initial_lengths
+        vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections) - initial_lengths
     ) / initial_lengths
 
     cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
@@ -729,24 +747,24 @@ def ColormapPlot_PBC_dilation(
     plt.gca().set_aspect("equal")
 
     plotting_edges = []
-    for row_index, row in enumerate(incidence_matrix):
+    for row_index in range(incidence_matrix.shape[0]):
+        row = incidence_matrix.getrow(row_index)
         row_correction = edge_corrections[row_index]
         if any(row_correction):
-            node_1_index, node_2_index = np.nonzero(row)[0]
-            if row[node_1_index] != 1:
+            node_1_index, node_2_index = row.indices
+            if row.data[0] != 1:
                 node_1_index, node_2_index = node_2_index, node_1_index
             node_1 = nodes[node_1_index] + row_correction
             node_2 = nodes[node_2_index]
-            if apply_pbc(node_1, node_2, L)[0] == [
-                node_1,
-                node_2,
-            ]:
+
+            if not (0 <= node_1[0] <= L and 0 <= node_1[1] <= L):
                 node_1 = nodes[node_1_index]
                 node_2 = nodes[node_2_index] - row_correction
+
             plotting_edges.append(apply_pbc(node_1, node_2, L))
         else:
-            node_1 = list(nodes[np.nonzero(row)[0][0]])
-            node_2 = list(nodes[np.nonzero(row)[0][1]])
+            node_1, node_2 = nodes[row.indices[0]], nodes[row.indices[1]]
+
             plotting_edges.append([node_1, node_2])
 
     for i, edge in enumerate(plotting_edges):
@@ -776,8 +794,24 @@ def ColormapPlot_PBC_dilation(
         cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
         boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
     )
-    # plt.savefig("prestress_network_deformed_equilibrium_example.pdf")
+    plt.show()
 
+    return plotting_edges
+
+
+def shit_plot(nodes, incidence_matrix, edge_corrections, L):
+    new_edges = []
+    for i in range(incidence_matrix.shape[0]):
+        row = incidence_matrix.getrow(i).indices
+        if not np.linalg.norm([nodes[row[0]] + edge_corrections[i] - nodes[row[1]]]) > L:
+            new_edges.append([nodes[row[0]] + edge_corrections[i], nodes[row[1]]])
+        else:
+            new_edges.append([nodes[row[0]] - edge_corrections[i], nodes[row[1]]])
+    plt.figure()
+    for item in new_edges:
+        plt.plot([item[0][0], item[1][0]], [item[0][1], item[1][1]], "r")
+    plt.plot([0, L, L, 0, 0], [0, 0, L, L, 0])
+    plt.show()
     return
 
 

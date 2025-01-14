@@ -1393,6 +1393,7 @@ def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initia
         cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
         boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
     )
-    plt.savefig("prestress_network_deformed_equilibrium_example.pdf")
+    plt.show()
+    # plt.savefig("prestress_network_deformed_equilibrium_example.pdf")
 
     return

@@ -305,7 +305,7 @@ def Realisation_dilation(
 
     total_time = time.time()
 
-    input_nodes = np.copy(nodes)
+    input_nodes = copy.deepcopy(nodes)
     flag_skipped_first_computation = 0
     for i in range(num_steps):
         if i == 0 and fibre_lengths_multiplier == 1:
