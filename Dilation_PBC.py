@@ -122,18 +122,6 @@ def Radau_timestepper_PBC(
             hessian[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
             hessian[2 * k : 2 * k + 2, 2 * i : 2 * i + 2] = component
 
-        # We now compute the more complex diagonal entries
-        for node in range(boundary_nodes):
-            edge_indices = np.nonzero(incidence_matrix[:, node])[0]
-            i = 2 * node
-            hessian[i : i + 2, i : i + 2] = sum(
-                [
-                    hessian_component(
-                        edge_vectors_normalised[edge], edge_lengths[edge] / initial_lengths[edge]
-                    )
-                    for edge in edge_indices
-                ]
-            )
         return hessian
 
     # Effectively computes the Hessian but with all potential non-zero elements = 1, which

@@ -696,18 +696,6 @@ def Create_pbc_Network(
         # Step 3: Trim rows (columns of original matrix) with less than 1 non-zero entry
         incidence_matrix, removed_nodes = trim_rows(incidence_matrix, min_nonzeros=1)
 
-        if not flag_not_first_trim:
-            print("\n")
-            print("In removed, not deleted")
-            for node in removed_nodes:
-                if node not in deleted_nodes:
-                    print(node)
-            print("\n")
-            print("In deleted, not removed")
-            for node in reversed(list(deleted_nodes)):
-                if node not in set(removed_nodes):
-                    print(node)
-
         if flag_not_first_trim:
             for node_index in reversed(removed_nodes):
                 del nodes[node_index]
@@ -799,7 +787,7 @@ def ColormapPlot_PBC_dilation(
     return plotting_edges
 
 
-def shit_plot(nodes, incidence_matrix, edge_corrections, L):
+def shit_plot(nodes, incidence_matrix, edge_corrections, L, lambda_1, lambda_2):
     new_edges = []
     for i in range(incidence_matrix.shape[0]):
         row = incidence_matrix.getrow(i).indices
@@ -808,11 +796,76 @@ def shit_plot(nodes, incidence_matrix, edge_corrections, L):
         else:
             new_edges.append([nodes[row[0]] - edge_corrections[i], nodes[row[1]]])
     plt.figure()
-    for item in new_edges:
-        plt.plot([item[0][0], item[1][0]], [item[0][1], item[1][1]], "r")
-    plt.plot([0, L, L, 0, 0], [0, 0, L, L, 0])
+    for i, item in enumerate(new_edges):
+        if any(edge_corrections[i]):
+            plt.plot([item[0][0], item[1][0]], [item[0][1], item[1][1]], "b")
+        else:
+            plt.plot([item[0][0], item[1][0]], [item[0][1], item[1][1]], "r")
+
+    plt.plot(
+        [0, lambda_1 * L, lambda_1 * L, 0, 0],
+        [0, 0, lambda_2 * L, lambda_2 * L, 0],
+    )
     plt.show()
     return
+
+
+def shit_plot_too(
+    nodes, incidence_matrix, edge_corrections, initial_lengths, L, lambda_1, lambda_2
+):
+    strains = (
+        vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections) - initial_lengths
+    ) / initial_lengths
+
+    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
+    cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
+    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
+    cpick.set_array([])
+    fig = plt.figure()
+    # plt.title(str(r"$\lambda_1,\lambda_2$ = {},{}".format(lambda_1, lambda_2)))
+    plt.gca().set_aspect("equal")
+
+    new_edges = []
+    for i in range(incidence_matrix.shape[0]):
+        row = incidence_matrix.getrow(i)
+        if any(edge_corrections[i]):
+            node_1 = nodes[row.indices[0]]
+            node_2 = nodes[row.indices[1]]
+            if np.linalg.norm(node_1 - (node_2 - edge_corrections[i])) > L:
+                node_2 = node_2 + edge_corrections[i]
+            else:
+                node_2 = node_2 - edge_corrections[i]
+
+            for segment in apply_pbc(node_1, node_2, lambda_1 * L):
+                item = [segment[0], segment[1]]
+                new_edges.append([segment[0], segment[1]])
+                plt.plot(
+                    [item[0][0], item[1][0]],
+                    [item[0][1], item[1][1]],
+                    color=cpick.to_rgba(strains[i]),
+                )
+        else:
+            item = [nodes[row.indices[0]], nodes[row.indices[1]]]
+            new_edges.append(item)
+            plt.plot(
+                [item[0][0], item[1][0]], [item[0][1], item[1][1]], color=cpick.to_rgba(strains[i])
+            )
+    # for item in new_edges:
+    #     plt.plot([item[0][0], item[1][0]], [item[0][1], item[1][1]], "r")
+    plt.plot(
+        [0, lambda_1 * L, lambda_1 * L, 0, 0],
+        [0, 0, lambda_2 * L, lambda_2 * L, 0],
+    )
+    ax = plt.gca()
+
+    plt.colorbar(
+        cpick,
+        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
+        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+    )
+
+    plt.show()
+    return new_edges
 
 
 #############################################################################
