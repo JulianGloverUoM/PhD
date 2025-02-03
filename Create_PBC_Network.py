@@ -685,16 +685,21 @@ def Create_pbc_Network(
     while trimming:
         # Save initial shape
         initial_shape = incidence_matrix.shape
+        print(initial_shape)
 
         # Step 1: Trim dangle or empty edges
         incidence_matrix, removed_edges = trim_rows(incidence_matrix, min_nonzeros=2)
+        print(removed_edges)
         for edge_index in reversed(removed_edges):
             edge_corrections = np.delete(edge_corrections, edge_index, axis=0)
         # Step 2: Transpose
         incidence_matrix = incidence_matrix.T
 
-        # Step 3: Trim rows (columns of original matrix) with less than 1 non-zero entry
-        incidence_matrix, removed_nodes = trim_rows(incidence_matrix, min_nonzeros=1)
+        # Step 3: Trim rows (columns of original matrix) with less than 2 non-zero entry
+        incidence_matrix, removed_nodes = trim_rows(
+            incidence_matrix, min_nonzeros=1 + flag_not_first_trim
+        )
+        print(removed_nodes)
 
         if flag_not_first_trim:
             for node_index in reversed(removed_nodes):
@@ -702,11 +707,12 @@ def Create_pbc_Network(
 
         # Step 4: Transpose back
         incidence_matrix = incidence_matrix.T
+        print(incidence_matrix.shape)
         # Check if dimensions have changed
         if incidence_matrix.shape == initial_shape and flag_not_first_trim:
             incidence_matrix_csr = incidence_matrix.tocsr()
             trimming = False
-        flag_not_first_trim += 1
+        flag_not_first_trim = 1
 
     # lengths = vector_of_magnitudes(incidence_matrix.dot(nodes) + edge_corrections)
     # for i, item in enumerate(edge_corrections):
@@ -865,7 +871,7 @@ def shit_plot_too(
     )
 
     plt.show()
-    return new_edges
+    return  # new_edges
 
 
 #############################################################################

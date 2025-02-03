@@ -15,6 +15,7 @@ import pickle
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
 import PBC_network  # noqa
+import Fixed_BC_script  # noqa
 import scipy as sp
 import scipy.stats as stats
 from datetime import date
@@ -335,7 +336,7 @@ def Radau_timestepper_dilation(
         hessian = np.zeros((2 * num_nodes, 2 * num_nodes))
         component = np.ones((2, 2))
         for edge in range(num_edges):
-            i, k = np.nonzero(incidence_matrix[edge, :])[0]
+            i, k = incidence_matrix.getrow(edge).indices
             if i >= boundary_nodes:
                 continue
             if k >= boundary_nodes:
@@ -534,28 +535,13 @@ def Realisation_dilation(
 
     stresses = []
 
-    Network = PBC_network.CreateNetwork(int(5.637 * density) * L**2, L, seed)
-
-    pbc_edges = Network[0][2]
-    pbc_nodes = Network[1][2]
-    pbc_incidence_matrix = Network[2][1]
-
-    (
-        nodes,
-        edges,
-        incidence_matrix,
-        boundary_nodes,
-        top_nodes,
-        bot_nodes,
-        left_nodes,
-        right_nodes,
-    ) = restructure_PBC_data(pbc_edges, pbc_nodes, pbc_incidence_matrix, L)
-
-    # print("Initial fiber lengths multiplier = ", fibre_lengths_multiplier)
+    (nodes, boundary_nodes, incidence_matrix) = Fixed_BC_script.Create_pbc_Network(
+        L,
+        density,
+        seed,
+    )
 
     initial_lengths = fibre_lengths_multiplier * vector_of_magnitudes(incidence_matrix.dot(nodes))
-
-    # initial_lengths[10] = 1.5 * initial_lengths[10]
 
     total_time = time.time()
 
