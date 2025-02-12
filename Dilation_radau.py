@@ -14,9 +14,9 @@ import pickle
 
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
-import PBC_network  # noqa
 import Fixed_BC_script  # noqa
 import scipy as sp
+from scipy.sparse import lil_matrix
 import scipy.stats as stats
 from datetime import date
 
@@ -333,7 +333,7 @@ def Radau_timestepper_dilation(
     # gives the sparsity structure of the Hessian without having to do the expensive computation
     def jac_sparsity_structure(y):
         num_edges, num_nodes = np.shape(incidence_matrix)
-        hessian = np.zeros((2 * num_nodes, 2 * num_nodes))
+        hessian = lil_matrix((2 * num_nodes, 2 * num_nodes))
         component = np.ones((2, 2))
         for edge in range(num_edges):
             i, k = incidence_matrix.getrow(edge).indices
@@ -489,7 +489,7 @@ def Radau_timestepper_dilation(
     y_output = np.reshape(y_values[-1], (np.shape(incidence_matrix)[1], 2))
     if Plot_networks:
         try:
-            PBC_network.ColormapPlot_dilation(
+            Fixed_BC_script.ColormapPlot_dilation(
                 y_output, incidence_matrix, L, lambda_1, lambda_2, initial_lengths
             )
         except IndexError or ZeroDivisionError or ValueError:
@@ -718,7 +718,7 @@ def jacobian(nodes, incidence_matrix, initial_lengths, boundary_nodes):
 # And rearanging the dot product formula (mod_pi) to obtain desired result
 
 
-def Orientation_distribution(nodes, incidence_matrix, Plot_data):
+def Orientation_distribution(nodes, incidence_matrix, Plot_data=False):
     edge_vectors = incidence_matrix.dot(nodes)
     lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
     orientations_output = []
@@ -799,18 +799,18 @@ def affine_stretch_def_calc(orientation, lambda_1, lambda_2):
     )
 
 
-def chi_undeformed(stretches, orientations, lambda_1, lambda_2):
+def lambda_p_undeformed(stretches, orientations, lambda_1, lambda_2):
     output = []
     for i, item in enumerate(orientations):
         output.append(stretches[i] / affine_stretch_calc(item, lambda_1, lambda_2))
     return output
 
 
-def chi_prestressed(stretches, orientations, lambda_1, lambda_2, initial_stretches):
-    return chi_undeformed(stretches, orientations, lambda_1, lambda_2) * initial_stretches
+def lambda_p_prestressed(stretches, orientations, lambda_1, lambda_2, initial_stretches):
+    return lambda_p_undeformed(stretches, orientations, lambda_1, lambda_2) * initial_stretches
 
 
-def chi_deformed(stretches, orientations, lambda_1, lambda_2):
+def lambda_p_deformed(stretches, orientations, lambda_1, lambda_2):
     output = []
     for i, item in enumerate(orientations):
         output.append(stretches[i] / affine_stretch_def_calc(item, lambda_1, lambda_2))
