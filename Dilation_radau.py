@@ -285,6 +285,13 @@ def Radau_timestepper_dilation(
         u_j = vector_of_magnitudes(l_j) - initial_lengths
         return 0.5 * np.matmul(1 / initial_lengths, np.square(u_j))
 
+    # def KE_fraction(y):
+    #     velocity_vector = np.reshape(scipy_fun(0, y), (np.shape(incidence_matrix)[1], 2))
+    #     velocity_magnitudes = vector_of_magnitudes(velocity_vector)
+    #     kinetic_energy = sum(0.5 * mass_vector * velocity_magnitudes * velocity_magnitudes)
+    #     strain_energy = energy_calc(y)
+    #     return kinetic_energy / (strain_energy + kinetic_energy)
+
     def hessian_component(l_j_hat, stretch):
         l_j_outer = np.einsum("i,k", l_j_hat, l_j_hat)
         coefficient = 1 - 1 / stretch
@@ -359,6 +366,8 @@ def Radau_timestepper_dilation(
     sparse_incidence = sp.sparse.csc_matrix(incidence_matrix)
     sparse_incidence_transpose = sp.sparse.csr_matrix(np.transpose(incidence_matrix))
 
+    # mass_vector = 0.5 * abs(sparse_incidence_transpose).dot(initial_lengths)
+
     y_values = []
     t_values = []
 
@@ -398,7 +407,7 @@ def Radau_timestepper_dilation(
             print("energy increasing")
             increasing_energy = True
             break
-        if np.linalg.norm(scipy_fun(None, y_values[-1])) < 1e-04:
+        if max(vector_of_magnitudes(scipy_fun(None, y_values[-1]))) < 1e-04:
             print("equilibrium achieved")
             break
 
@@ -439,7 +448,8 @@ def Radau_timestepper_dilation(
                     # print("Norm after t = ", i + 1)
                     # print(np.linalg.norm(scipy_fun(None, sol.y)))
                     break
-            if np.linalg.norm(scipy_fun(None, y_values[-1])) < 1e-04:
+            if max(vector_of_magnitudes(scipy_fun(None, y_values[-1]))) < 1e-04:
+                print("equilibrium achieved")
                 break
 
             y_input = y_values[-1]
@@ -663,7 +673,11 @@ def Realisation_dilation(
 
     print("Total Realisation time =", time.time() - realisation_start_time)
 
-    return (data, [p_top, p_bot, p_left, p_right], (nodes, initial_lengths, incidence_matrix))
+    return (
+        data,
+        [p_top, p_bot, p_left, p_right],
+        (nodes, initial_lengths, boundary_nodes, incidence_matrix),
+    )
 
 
 # Jacobian calculation is identical to hessian excepting the df_i/dr_k elements when f_i==0 as a
@@ -888,7 +902,7 @@ def stretch_prediction_st(shape_st, loc_st, scale_st, lambda_1, lambda_2, min_st
             [1 + ((L / x - loc_st) / scale_st) ** 2 / shape_st] ** (-(shape_st + 1) / 2)
             / (
                 np.sqrt(np.pi * shape_st)
-                * np.sqrt((lambda_1**2 - x**2) * (x**2 - lambda_2**2))
+                * np.sqrt(-(lambda_1**2 - x**2) * (x**2 - lambda_2**2))
             )
         )
 

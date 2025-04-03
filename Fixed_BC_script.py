@@ -659,13 +659,18 @@ def Create_pbc_Network(
 #############################################################################
 
 
-def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initial_lengths):
-    strains = (
-        vector_of_magnitudes(incidence_matrix.dot(nodes)) - initial_lengths
-    ) / initial_lengths
+def ColormapPlot_dilation(
+    nodes,
+    incidence_matrix,
+    L,
+    lambda_1,
+    lambda_2,
+    plotted_quantity,
+    plotted_quantity_name="Plotted Quantity",
+):
 
     cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
-    cnorm = mcol.Normalize(vmin=min(strains), vmax=max(strains))
+    cnorm = mcol.Normalize(vmin=min(plotted_quantity), vmax=max(plotted_quantity))
     cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
     cpick.set_array([])
     fig = plt.figure()
@@ -683,7 +688,10 @@ def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initia
         edge = new_edges[i]
 
         plt.plot(
-            [edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color=cpick.to_rgba(strains[i])
+            [edge[0][0], edge[1][0]],
+            [edge[0][1], edge[1][1]],
+            color=cpick.to_rgba(plotted_quantity[i]),
+            linewidth=0.3,
         )
 
     plt.plot(
@@ -695,12 +703,22 @@ def ColormapPlot_dilation(nodes, incidence_matrix, L, lambda_1, lambda_2, initia
     # plt.xlim(0 - 0.1 * L, 1.1 * lambda_1 * L)
     # plt.ylim(0 - 0.1 * L, 1.1 * lambda_2 * L)
 
-    plt.colorbar(
+    cax = fig.add_axes([0.85, 0.25, 0.05, 0.5])
+    cbar = plt.colorbar(
         cpick,
-        cax=fig.add_axes([0.85, 0.25, 0.05, 0.5]),
-        boundaries=np.arange(min(strains), max(strains), (max(strains) - min(strains)) / 100),
+        cax=cax,
+        boundaries=np.arange(
+            min(plotted_quantity),
+            max(plotted_quantity),
+            min((max(plotted_quantity) - min(plotted_quantity)) / 100, 100),
+        ),
     )
+
+    # Set title above colorbar
+    cax.set_title(plotted_quantity_name)
+
+    # plt.savefig("Informal_applied_talk_example_7_4.pdf")
+
     plt.show()
-    # plt.savefig("prestress_network_deformed_equilibrium_example.pdf")
 
     return
