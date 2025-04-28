@@ -869,7 +869,6 @@ def stretch_prediction_gamma(k, theta, lambda_1, lambda_2, min_stretch, max_stre
 
 
 def stretch_prediction_lognorm(mu, sigma, lambda_1, lambda_2, min_stretch, max_stretch):
-
     lambda_inputs = np.linspace(min_stretch - 0.05, max_stretch, 10000)
     output = []
     for L in lambda_inputs:

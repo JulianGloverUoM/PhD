@@ -257,11 +257,6 @@ def trim_nodes(matrix, min_nonzeros, nodes, L):
 
 
 def permute_sparse_matrix(M, new_row_order=None, new_col_order=None):
-    """
-    Reorders the rows and/or columns in a scipy sparse matrix
-        using the specified array(s) of indexes
-        e.g., [1,0,2,3,...] would swap the first and second row/col.
-    """
     if new_row_order is None and new_col_order is None:
         return M
 
