@@ -248,40 +248,47 @@ def calculate_stress_strain_stretch(
 
 
 def Radau_timestepper_dilation(
-    L, nodes, incidence_matrix, boundary_nodes, initial_lengths, lambda_1, lambda_2, Plot_networks
+    L,
+    nodes,
+    incidence_matrix,
+    boundary_nodes,
+    initial_lengths,
+    lambda_1,
+    lambda_2,
+    Plot_networks=False,
 ):
     # def scipy_fun(t, y):
     #     matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-    #     l_j = sparse_incidence.dot(matrix_y)
+    #     l_j = incidence_matrix.dot(matrix_y)
     #     l_j_hat = normalise_elements(l_j)
     #     F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
     #     product = np.einsum("ij,i->ij", l_j_hat, F_j)
-    #     f_jk = sparse_incidence_transpose.dot(product)
+    #     f_jk = incidence_matrix.T.dot(product)
     #     f_jk[boundary_nodes:] = 0
     #     return -np.reshape(f_jk, 2 * np.shape(f_jk)[0], order="C")
 
     def scipy_fun(t, y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-        l_j = sparse_incidence.dot(matrix_y)
+        l_j = incidence_matrix.dot(matrix_y)
         l_j_hat = normalise_elements(l_j)
         F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
         product = np.einsum("ij,i->ij", l_j_hat, F_j)
-        f_jk = sparse_incidence_transpose.dot(product)
+        f_jk = incidence_matrix.T.dot(product)
         f_jk[boundary_nodes:] = 0
         return -np.reshape(f_jk, 2 * np.shape(f_jk)[0], order="C")
 
     def boundary_force(y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-        l_j = sparse_incidence.dot(matrix_y)
+        l_j = incidence_matrix.dot(matrix_y)
         l_j_hat = normalise_elements(l_j)
         F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
         product = np.einsum("ij,i->ij", l_j_hat, F_j)
-        f_jk = sparse_incidence_transpose.dot(product)
+        f_jk = incidence_matrix.T.dot(product)
         return -f_jk
 
     def energy_calc(y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-        l_j = sparse_incidence.dot(matrix_y)
+        l_j = incidence_matrix.dot(matrix_y)
         u_j = vector_of_magnitudes(l_j) - initial_lengths
         return 0.5 * np.matmul(1 / initial_lengths, np.square(u_j))
 
@@ -300,7 +307,7 @@ def Radau_timestepper_dilation(
     def jacobian(y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
         num_edges, num_nodes = np.shape(incidence_matrix)
-        edge_vectors = sparse_incidence.dot(matrix_y)
+        edge_vectors = incidence_matrix.dot(matrix_y)
         edge_lengths = vector_of_magnitudes(edge_vectors)
         edge_vectors_normalised = normalise_elements(edge_vectors)
         hessian = np.zeros((2 * num_nodes, 2 * num_nodes))
@@ -363,10 +370,7 @@ def Radau_timestepper_dilation(
     y = dilation_deformation(nodes, lambda_1, lambda_2)
     y = np.reshape(y, 2 * np.shape(y)[0], order="C")
 
-    sparse_incidence = sp.sparse.csc_matrix(incidence_matrix)
-    sparse_incidence_transpose = sp.sparse.csr_matrix(np.transpose(incidence_matrix))
-
-    # mass_vector = 0.5 * abs(sparse_incidence_transpose).dot(initial_lengths)
+    # mass_vector = 0.5 * abs(incidence_matrix.T).dot(initial_lengths)
 
     y_values = []
     t_values = []
@@ -407,7 +411,14 @@ def Radau_timestepper_dilation(
             print("energy increasing")
             increasing_energy = True
             break
-        if max(vector_of_magnitudes(scipy_fun(None, y_values[-1]))) < 1e-04:
+        if (
+            max(
+                vector_of_magnitudes(
+                    np.reshape(scipy_fun(None, y_values[-1]), (np.shape(incidence_matrix)[1], 2))
+                )
+            )
+            < 1e-04
+        ):
             print("equilibrium achieved")
             break
 
@@ -448,7 +459,16 @@ def Radau_timestepper_dilation(
                     # print("Norm after t = ", i + 1)
                     # print(np.linalg.norm(scipy_fun(None, sol.y)))
                     break
-            if max(vector_of_magnitudes(scipy_fun(None, y_values[-1]))) < 1e-04:
+            if (
+                max(
+                    vector_of_magnitudes(
+                        np.reshape(
+                            scipy_fun(None, y_values[-1]), (np.shape(incidence_matrix)[1], 2)
+                        )
+                    )
+                )
+                < 1e-04
+            ):
                 print("equilibrium achieved")
                 break
 
@@ -515,7 +535,7 @@ def Radau_timestepper_dilation(
     return (
         [force_top, force_bot, force_left, force_right],
         [t_vals, norm_values],
-        y_output,
+        y_output,  # The nodes in equilibrium positions
         energy_values,
     )
 
@@ -556,11 +576,11 @@ def Realisation_dilation(
     total_time = time.time()
 
     input_nodes = np.copy(nodes)
-    flag_skipped_first_computation = 0
+    # flag_skipped_first_computation = 0
     for i in range(num_steps):
-        if i == 0 and fibre_lengths_multiplier == 1:
-            flag_skipped_first_computation = 1
-            continue
+        # if i == 0 and fibre_lengths_multiplier == 1:
+        #     flag_skipped_first_computation = 1
+        #     continue
         data.append(
             Radau_timestepper_dilation(
                 L,
@@ -575,7 +595,7 @@ def Realisation_dilation(
         )
         # Each step we provide a guess for the solution at the next step using the previous solution
         input_nodes = invert_dilation(
-            data[i - flag_skipped_first_computation][-2],
+            data[i][-2],
             1 + lambda_1_step * i,
             1 + lambda_2_step * i,
         )
@@ -901,7 +921,7 @@ def stretch_prediction_st(shape_st, loc_st, scale_st, lambda_1, lambda_2, min_st
             [1 + ((L / x - loc_st) / scale_st) ** 2 / shape_st] ** (-(shape_st + 1) / 2)
             / (
                 np.sqrt(np.pi * shape_st)
-                * np.sqrt(-(lambda_1**2 - x**2) * (x**2 - lambda_2**2))
+                * np.sqrt((lambda_1**2 - x**2) * (x**2 - lambda_2**2))
             )
         )
 
