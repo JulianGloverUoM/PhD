@@ -770,6 +770,7 @@ def Orientation_distribution(nodes, incidence_matrix, Plot_data=False):
         )
         plt.xlabel(r"$\theta$")
         plt.title(r"PDF of fibre orientations")
+        plt.show()
     return orientations_output
 
 
