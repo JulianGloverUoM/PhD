@@ -8,7 +8,7 @@ Created on Mon Feb  3 14:08:06 2025
 
 # -*- coding: utf-8 -*-
 
-# Script to generate a PBC network with data structure in compliance with rerquirements for solving
+# Script to generate a PBC network with data structure in compliance with requirements for solving
 # for equilibrium positions using dispersive energy ODE method.
 
 # get bent Rupinder Matharu
