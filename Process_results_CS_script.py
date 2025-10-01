@@ -26,6 +26,12 @@ import scipy as sp
 
 from Dilation_radau import *
 
+sys.argv = sys.argv + ["L_1_10_rho_2_10_p_05_40_realisations_study_files"]
+
+sys.argv = sys.argv + [0.5]
+
+sys.argv = sys.argv + [0]
+
 print([sys.argv[1], sys.argv[2], sys.argv[3]])
 
 # Updated regex pattern to match filenames

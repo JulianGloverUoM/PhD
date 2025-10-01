@@ -66,125 +66,6 @@ def frobenius_norm(input_array):
 #############################################################################
 
 
-def restructure_PBC_data(pbc_edges, pbc_nodes, pbc_incidence_matrix, L):
-    PBC_data = []
-
-    for edge in pbc_edges:
-        if len(edge) == 2:
-            PBC_data.append(
-                [
-                    pbc_edges.index(edge),
-                    np.nonzero(pbc_incidence_matrix[pbc_edges.index(edge)])[0],
-                    edge[0][1],
-                    edge[1][0],
-                ]
-            )
-        if len(edge) == 3:
-            PBC_data.append(
-                [
-                    pbc_edges.index(edge),
-                    np.nonzero(pbc_incidence_matrix[pbc_edges.index(edge)])[0],
-                    edge[0][1],
-                    edge[1],
-                    edge[2][0],
-                ]
-            )
-
-    incidence_matrix = np.copy(pbc_incidence_matrix)
-
-    edges = copy.deepcopy(pbc_edges)
-    nodes = np.copy(pbc_nodes)
-
-    incidence_matrix = np.block(
-        [
-            [incidence_matrix, np.zeros([len(pbc_edges), 2 * len(PBC_data)])],
-            [np.zeros([len(PBC_data), 2 * len(PBC_data) + np.shape(incidence_matrix)[1]])],
-        ]
-    )
-
-    if L == 1:
-        d = 0.5
-    else:
-        d = 1
-
-    for item in PBC_data:
-        edge_index = item[0]
-        node_indices = item[1]
-        # This makes sure the nodes (a,b) in node_indices are ordered such that
-        # b is connected to the last entry of the item.
-        if np.linalg.norm(nodes[node_indices[0]] - np.array(item[-1])) < d:
-            node_indices = np.flip(node_indices, 0)
-        if len(item) == 4:
-            # Truncating old boundary edges and adding 'new' edges by
-            # adding the end segment as a new edge, and remove that segement (and midde part)
-            edges.append([edges[edge_index][-1]])
-            edges[edge_index].remove(edges[edge_index][-1])
-
-            # Removing the node connectivity across the boundary from the adjacency matrix
-            # and replacing it with connections to 'new' nodes added on the boundary
-            incidence_matrix[edge_index] = 0
-            incidence_matrix[edge_index][node_indices[0]] = 1
-            incidence_matrix[edge_index][len(nodes)] = -1
-            nodes = np.append(nodes, np.array([item[2]]), axis=0)
-
-            incidence_matrix[len(edges) - 1] = 0
-            incidence_matrix[len(edges) - 1][node_indices[1]] = 1
-            incidence_matrix[len(edges) - 1][len(nodes)] = -1
-            nodes = np.append(nodes, np.array([item[3]]), axis=0)
-        else:
-            edges.append([edges[edge_index][-1]])
-            edges[edge_index].remove(edges[edge_index][-1])
-            edges[edge_index].remove(edges[edge_index][-1])
-
-            incidence_matrix[edge_index] = 0
-            incidence_matrix[edge_index][node_indices[0]] = 1
-            incidence_matrix[edge_index][len(nodes)] = -1
-            nodes = np.append(nodes, np.array([item[2]]), axis=0)
-
-            incidence_matrix[len(edges) - 1] = 0
-            incidence_matrix[len(edges) - 1][node_indices[1]] = 1
-            incidence_matrix[len(edges) - 1][len(nodes)] = -1
-            nodes = np.append(nodes, np.array([item[-1]]), axis=0)
-
-    # All nodes from nodes[boundary_nodes] inclusive are on the boundary and
-    # thus fixed after deformation
-
-    boundary_nodes = len(pbc_nodes)
-
-    top_nodes = []
-
-    bot_nodes = []
-
-    left_nodes = []
-
-    right_nodes = []
-
-    for i in range(len(nodes[boundary_nodes:])):
-        if nodes[i + boundary_nodes][1] == L:
-            top_nodes.append(i + boundary_nodes)
-        if nodes[i + boundary_nodes][1] == 0:
-            bot_nodes.append(i + boundary_nodes)
-        if nodes[i + boundary_nodes][0] == 0:
-            left_nodes.append(i + boundary_nodes)
-        if nodes[i + boundary_nodes][0] == L:
-            right_nodes.append(i + boundary_nodes)
-
-    return (
-        nodes,
-        edges,
-        incidence_matrix,
-        boundary_nodes,
-        top_nodes,
-        bot_nodes,
-        left_nodes,
-        right_nodes,
-    )
-
-
-#############################################################################
-#############################################################################
-
-
 def calculate_stress_strain_stretch(
     data, lambda_1_step, lambda_2_step, num_steps, L, fibre_lengths_multiplier
 ):
@@ -257,16 +138,6 @@ def Radau_timestepper_dilation(
     lambda_2,
     Plot_networks=False,
 ):
-    # def scipy_fun(t, y):
-    #     matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-    #     l_j = incidence_matrix.dot(matrix_y)
-    #     l_j_hat = normalise_elements(l_j)
-    #     F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
-    #     product = np.einsum("ij,i->ij", l_j_hat, F_j)
-    #     f_jk = incidence_matrix.T.dot(product)
-    #     f_jk[boundary_nodes:] = 0
-    #     return -np.reshape(f_jk, 2 * np.shape(f_jk)[0], order="C")
-
     def scipy_fun(t, y):
         matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
         l_j = incidence_matrix.dot(matrix_y)
@@ -291,13 +162,6 @@ def Radau_timestepper_dilation(
         l_j = incidence_matrix.dot(matrix_y)
         u_j = vector_of_magnitudes(l_j) - initial_lengths
         return 0.5 * np.matmul(1 / initial_lengths, np.square(u_j))
-
-    # def KE_fraction(y):
-    #     velocity_vector = np.reshape(scipy_fun(0, y), (np.shape(incidence_matrix)[1], 2))
-    #     velocity_magnitudes = vector_of_magnitudes(velocity_vector)
-    #     kinetic_energy = sum(0.5 * mass_vector * velocity_magnitudes * velocity_magnitudes)
-    #     strain_energy = energy_calc(y)
-    #     return kinetic_energy / (strain_energy + kinetic_energy)
 
     def hessian_component(l_j_hat, stretch):
         l_j_outer = np.einsum("i,k", l_j_hat, l_j_hat)
@@ -517,10 +381,23 @@ def Radau_timestepper_dilation(
     force_right = np.array([force_all[item] for item in right_nodes])
 
     y_output = np.reshape(y_values[-1], (np.shape(incidence_matrix)[1], 2))
-    if Plot_networks:
+    if (
+        Plot_networks
+        and np.linalg.norm(
+            vector_of_magnitudes(incidence_matrix.dot(y_output)) / initial_lengths - 1
+        )
+        > 1e-12
+    ):
+
         try:
             Fixed_BC_script.ColormapPlot_dilation(
-                y_output, incidence_matrix, L, lambda_1, lambda_2, initial_lengths
+                y_output,
+                incidence_matrix,
+                L,
+                lambda_1,
+                lambda_2,
+                ((vector_of_magnitudes(incidence_matrix.dot(y_output)) / initial_lengths) - 1),
+                r"$F_j$",
             )
         except IndexError or ZeroDivisionError or ValueError:
             pass
