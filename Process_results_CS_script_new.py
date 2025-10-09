@@ -26,88 +26,111 @@ import scipy as sp
 
 from Dilation_radau import *
 
-# print(stop)
 
 print([sys.argv[1], sys.argv[2], sys.argv[3]])
 
-# Updated regex pattern to match filenames
-pattern = r"Dilation_radau_realisation_(\d+)_(\d+)\.0_(\d+)_.*\.dat"
 
-# Directory containing your .dat files
+# Directories
 directory = sys.argv[1]
+other_directory = "L_1_10_rho_2_10_p_1_study_files"
 
 p = float(sys.argv[2])
-
 flag_first_or_second_deformation = int(sys.argv[3])
 
 if p != 1:
-    stretch = (
-        1 - flag_first_or_second_deformation
-    ) * 1 / p + flag_first_or_second_deformation * 1.2 / p
-
-# Prepare final results
+    stretch = (1 - flag_first_or_second_deformation) * (
+        1 / p
+    ) + flag_first_or_second_deformation * (1.2 / p)
 
 rho_dict = {2: 0, 4: 1, 6: 2, 8: 3, 10: 4}
-
 lambda_p_converged = [[[] for _ in range(5)] for _ in range(10)]
+
+
+other_index = {}
+for fn in os.listdir(other_directory):
+    m = re.match(pattern, fn)
+    if not m:
+        continue
+    Xo, Yo, Zo = map(int, m.groups())
+    other_index[(Xo, Yo, Zo)] = os.path.join(other_directory, fn)
+
 
 for filename in os.listdir(directory):
     match = re.match(pattern, filename)
-    if match:
-        X, Y, Z = map(int, match.groups())
-        x_index = X - 1
-        y_index = rho_dict[Y]
+    if not match:
+        continue
 
-        file_path = os.path.join(directory, filename)
+    X, Y, Z = map(int, match.groups())
+    y_index = rho_dict.get(Y)
+    if y_index is None:
+        continue
+    x_index = X - 1
 
-        # Load and process immediately
+    file_path = os.path.join(directory, filename)
+
+    try:
         with open(file_path, "rb") as f:
             item = pickle.load(f)
-        
-        with open()
-        nodes = item[0][int(sys.argv[3])][-2] / p
-        initial_nodes = np.array(item[-1][0]) / p
-        incidence_matrix = item[-1][-1]
-        initial_lengths = item[-1][1] / p
+    except Exception as e:
+        print(f"Failed to load {file_path}: {e}")
+        continue
 
-        L = X
-        for k, node in enumerate(initial_nodes[::-1]):
-            if not (
-                any([abs(item - 0) <= 1e-15 for item in node])
-                or any([abs(item - L) <= 1e-15 for item in node])
-            ):
-                boundary_nodes = len(nodes) - k
+    other_path = other_index.get((X, Y, Z))
+    if not other_path:
+        continue
+    try:
+        with open(other_path, "rb") as f:
+            other_item = pickle.load(f)
+    except Exception as e:
+        print(f"Failed to load {other_path}: {e}")
+        continue
 
-        def scipy_fun(t, y):
-            matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
-            l_j = incidence_matrix.dot(matrix_y)
-            l_j_hat = normalise_elements(l_j)
-            F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
-            product = np.einsum("ij,i->ij", l_j_hat, F_j)
-            f_jk = incidence_matrix.T.dot(product)
-            f_jk[boundary_nodes:] = 0
-            return -np.reshape(f_jk, 2 * np.shape(f_jk)[0], order="C")
+    nodes = item[0][flag_first_or_second_deformation][-2] / p
 
+    initial_nodes = np.array(other_item[-1][0])
+    initial_lengths = np.array(other_item[-1][1])
+    incidence_matrix = item[-1][-1]
+
+    L = X
+    for k, node in enumerate(initial_nodes[::-1]):
         if not (
-            max(
-                vector_of_magnitudes(
-                    np.reshape(scipy_fun(None, nodes), (np.shape(incidence_matrix)[1], 2))
-                )
-            )
-            < 1e-04
+            any([abs(item - 0) <= 1e-15 for item in node])
+            or any([abs(item - L) <= 1e-15 for item in node])
         ):
-            continue
-        stretches = vector_of_magnitudes(incidence_matrix.dot(nodes)) / initial_lengths
-        theta = Orientation_distribution(initial_nodes, incidence_matrix, False)
-        lambda_p = lambda_p_undeformed(stretches, theta, stretch, stretch)
+            boundary_nodes = len(nodes) - k
+            break
 
-        # Store only final results
+    def scipy_fun(t, y):
+        matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
+        l_j = incidence_matrix.dot(matrix_y)
+        l_j_hat = normalise_elements(l_j)
+        F_j = (np.sqrt(np.einsum("ij,ij->i", l_j, l_j)) - initial_lengths) / initial_lengths
+        product = np.einsum("ij,i->ij", l_j_hat, F_j)
+        f_jk = incidence_matrix.T.dot(product)
+        f_jk[boundary_nodes:] = 0
+        return -np.reshape(f_jk, 2 * np.shape(f_jk)[0], order="C")
 
-        lambda_p_converged[x_index][y_index].append(lambda_p)
-with open(
-    "lambda_p_{}.dat".format(stretch),
-    "wb",
-) as f:
+    # Convergence check
+    if not (
+        max(
+            vector_of_magnitudes(
+                np.reshape(scipy_fun(None, nodes), (np.shape(incidence_matrix)[1], 2))
+            )
+        )
+        < 1e-04
+    ):
+        continue
+
+    stretches = vector_of_magnitudes(incidence_matrix.dot(nodes)) / initial_lengths
+    theta = Orientation_distribution(initial_nodes, incidence_matrix, False)
+
+    lambda_p = lambda_p_undeformed(stretches, theta, stretch, stretch)
+
+    lambda_p_converged[x_index][y_index].append(lambda_p)
+
+
+outfile = f"lambda_p_{stretch}.dat" if p != 1 else "lambda_p_1.0.dat"
+with open(outfile, "wb") as f:
     pickle.dump(lambda_p_converged, f)
 
 #############################################################################
