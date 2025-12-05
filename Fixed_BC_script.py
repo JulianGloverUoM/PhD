@@ -658,8 +658,8 @@ def ColormapPlot_dilation(
     nodes,
     incidence_matrix,
     L,
-    lambda_1,
-    lambda_2,
+    Lambda_1,
+    Lambda_2,
     plotted_quantity,
     plotted_quantity_name="Plotted Quantity",
 ):
@@ -669,7 +669,13 @@ def ColormapPlot_dilation(
     cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
     cpick.set_array([])
     fig = plt.figure()
-    plt.title(str(r"$\lambda_1,\lambda_2$ = {},{}".format(lambda_1, lambda_2)))
+
+    # if Lambda_1 == Lambda_2:
+    #     plt.title(str(r"$\Lambda, L, \rho$ = {}, {}, {}".format(1.2, L, density)))
+    # else:
+    #     plt.title(str(r"$\Lambda_1,\Lambda_2$ = {},{}".format(Lambda_1, Lambda_2)))
+
+    plt.title(str(r"$L = {}, \rho = {}$".format(L, 6)))
     plt.gca().set_aspect("equal")
 
     new_edges = []
@@ -686,33 +692,93 @@ def ColormapPlot_dilation(
             [edge[0][0], edge[1][0]],
             [edge[0][1], edge[1][1]],
             color=cpick.to_rgba(plotted_quantity[i]),
-            linewidth=0.3,
+            linewidth=0.5,
         )
 
     plt.plot(
-        [0, lambda_1 * L, lambda_1 * L, 0, 0],
-        [0, 0, lambda_2 * L, lambda_2 * L, 0],
+        [0, Lambda_1 * L, Lambda_1 * L, 0, 0],
+        [0, 0, Lambda_2 * L, Lambda_2 * L, 0],
     )
     ax = plt.gca()
 
-    # plt.xlim(0 - 0.1 * L, 1.1 * lambda_1 * L)
-    # plt.ylim(0 - 0.1 * L, 1.1 * lambda_2 * L)
+    # plt.xlim(0 - 0.1 * L, 1.1 * Lambda_1 * L)
+    # plt.ylim(0 - 0.1 * L, 1.1 * Lambda_2 * L)
 
-    cax = fig.add_axes([0.85, 0.25, 0.05, 0.5])
-    cbar = plt.colorbar(
-        cpick,
-        cax=cax,
-        boundaries=np.arange(
-            min(plotted_quantity),
-            max(plotted_quantity),
-            min((max(plotted_quantity) - min(plotted_quantity)) / 100, 100),
-        ),
+    # cax = fig.add_axes([0.85, 0.25, 0.05, 0.5])
+    # cbar = plt.colorbar(
+    #     cpick,
+    #     cax=cax,
+    #     boundaries=np.arange(
+    #         min(plotted_quantity),
+    #         max(plotted_quantity),
+    #         min((max(plotted_quantity) - min(plotted_quantity)) / 100, 100),
+    #     ),
+    # )
+
+    # # Set title above colorbar
+    # cax.set_title(plotted_quantity_name)
+
+    plt.savefig("Colourmap_stretch_Lambda1_1_2_Lambda2_1_2_L_{}_rho_{}_seed_0.pdf".format(L, 6))
+
+    plt.show()
+
+    return
+
+
+def Generate_NetworkPlot(L, density, seed):
+    (
+        nodes,
+        boundary_nodes,
+        incidence_matrix,
+    ) = Create_pbc_Network(L, density, seed)
+    initial_lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
+    plotted_quantity = initial_lengths
+    # cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
+    cm1 = mcol.LinearSegmentedColormap.from_list("grey_black", ["lightgrey", "black"])
+    cnorm = mcol.Normalize(vmin=min(plotted_quantity), vmax=max(plotted_quantity))
+    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
+    cpick.set_array([])
+    fig = plt.figure()
+    plt.title(r"$L = {}, \rho = {}$".format(int(L), int(density)))
+    plt.gca().set_aspect("equal")
+
+    new_edges = []
+    for row in range(incidence_matrix.shape[0]):
+        index_1, index_2 = incidence_matrix.getrow(row).indices
+        node_1 = nodes[index_1]
+        node_2 = nodes[index_2]
+        new_edges.append([node_1, node_2])
+
+    for i in range(len(new_edges)):
+        edge = new_edges[i]
+
+        plt.plot(
+            [edge[0][0], edge[1][0]],
+            [edge[0][1], edge[1][1]],
+            color=cpick.to_rgba(plotted_quantity[i]),
+            linewidth=0.5,
+        )
+
+    plt.plot(
+        [0, L, L, 0, 0],
+        [0, 0, L, L, 0],
     )
+    ax = plt.gca()
+    # cax = fig.add_axes([0.85, 0.25, 0.05, 0.5])
+    # cbar = plt.colorbar(
+    #     cpick,
+    #     cax=cax,
+    #     boundaries=np.arange(
+    #         min(plotted_quantity),
+    #         max(plotted_quantity),
+    #         min((max(plotted_quantity) - min(plotted_quantity)) / 100, 100),
+    #     ),
+    # )
 
-    # Set title above colorbar
-    cax.set_title(plotted_quantity_name)
+    # # Set title above colorbar
+    # cax.set_title(r"$l_j$")
 
-    # plt.savefig("Informal_applied_talk_example_7_4.pdf")
+    plt.savefig("Colourmap_initial_edge_length_L_{}_rho_{}_seed_0.pdf".format(int(L), int(density)))
 
     plt.show()
 

@@ -258,7 +258,7 @@ def Radau_timestepper_dilation(
 
     max_tau = 200.0  # or whatever “upper bound” you’d allow
 
-    sol = sp.integrate.Radau(
+    sol = sp.integrate.BDF(
         scipy_fun,
         0.0,
         y,
@@ -308,7 +308,7 @@ def Radau_timestepper_dilation(
     # However these stricter error tolerances also increase the computational cost
     # of the scheme to we implement a test to only increase the tolerance when required.
     if increasing_energy or slow_convergence:
-        sol = sp.integrate.Radau(
+        sol = sp.integrate.BDF(
             scipy_fun,
             t_vals[-1],
             y_vals[-1],
