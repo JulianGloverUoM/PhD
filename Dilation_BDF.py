@@ -133,7 +133,7 @@ def calculate_stress_strain_stretch(
 #############################################################################
 
 
-def Radau_timestepper_dilation(
+def BDF_timestepper_dilation(
     L,
     nodes,
     incidence_matrix,
@@ -455,7 +455,7 @@ def Realisation_dilation(
         #     flag_skipped_first_computation = 1
         #     continue
         data.append(
-            Radau_timestepper_dilation(
+            BDF_timestepper_dilation(
                 L,
                 input_nodes,
                 incidence_matrix,
@@ -545,7 +545,7 @@ def Realisation_dilation(
             )
         )
     with open(
-        "Dilation_radau_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_".format(
+        "Dilation_BDF_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_".format(
             L,
             density,
             seed,
@@ -844,34 +844,35 @@ def discrete_stress(nodes, incidence_matrix, initial_lengths, L):
 # Profiling Stuff
 
 
-# def run_once():
-#     # >>> put in the actual arguments you use <<<
-#     L = 2
-#     density = 10
-#     seed = 4
+def run_once():
+    # >>> put in the actual arguments you use <<<
+    L = 2
+    density = 10
+    seed = 4
 
-#     Lambda_1 = 2.8
-#     Lambda_2 = 2.8
+    Lambda_1 = 2.8
+    Lambda_2 = 2.8
 
-#     (nodes, boundary_nodes, incidence_matrix) = Fixed_BC_script.Create_pbc_Network(
-#         L,
-#         density,
-#         seed,
-#     )
+    (nodes, boundary_nodes, incidence_matrix) = Fixed_BC_script.Create_pbc_Network(
+        L,
+        density,
+        seed,
+    )
 
-#     initial_lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
+    initial_lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
 
-#     Radau_timestepper_dilation(
-#         L,
-#         nodes,
-#         incidence_matrix,
-#         boundary_nodes,
-#         initial_lengths,
-#         Lambda_1,
-#         Lambda_2,
-#         Plot_networks=False,  # avoid profiling plotting
-#     )
+    BDF_timestepper_dilation(
+        L,
+        nodes,
+        incidence_matrix,
+        boundary_nodes,
+        initial_lengths,
+        Lambda_1,
+        Lambda_2,
+        Plot_networks=False,  # avoid profiling plotting
+    )
+    return
 
 
-# if __name__ == "__main__":
-#     run_once()
+if __name__ == "__main__":
+    run_once()
