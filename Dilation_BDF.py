@@ -27,7 +27,7 @@ from datetime import date
 
 
 def dilation_deformation(input_nodes, Lambda_1, Lambda_2):
-    return np.array([np.array([[Lambda_1, 0], [0, Lambda_2]]).dot(item) for item in input_nodes])
+    return np.array([[Lambda_1, 0], [0, Lambda_2]]) * np.array(input_nodes)[:, None]
 
 
 def invert_dilation(input_nodes, Lambda_1, Lambda_2):
@@ -144,7 +144,6 @@ def BDF_timestepper_dilation(
     Plot_networks=False,
 ):
     num_nodes = incidence_matrix.shape[1]
-    incidence_T = incidence_matrix.T
     inv_initial_lengths = 1.0 / initial_lengths
 
     def scipy_fun(t, y):
@@ -242,21 +241,18 @@ def BDF_timestepper_dilation(
     y = dilation_deformation(nodes, Lambda_1, Lambda_2)
     y = np.reshape(y, 2 * np.shape(y)[0], order="C")
 
-    # mass_vector = 0.5 * abs(incidence_matrix.T).dot(initial_lengths)
-
     y_vals = []
     t_vals = []
 
     jac_structure = jac_sparsity_structure(y)
 
-    y_input = y
     ###############
     # Timestepping
 
     increasing_energy = False
     slow_convergence = False
 
-    max_tau = 200.0  # or whatever “upper bound” you’d allow
+    max_tau = 500.0
 
     sol = sp.integrate.BDF(
         scipy_fun,
@@ -276,7 +272,7 @@ def BDF_timestepper_dilation(
     while True:
         sol.step()
         if sol.status in ("finished", "failed"):
-            print("Equilibrium achieved/failed")
+            print("Equilibrium failed")
             break
 
         if len(y_vals) > 2 and energy_calc(sol.y) > energy_calc(y_vals[-2]):
@@ -287,11 +283,6 @@ def BDF_timestepper_dilation(
         t_vals.append(sol.t)
         y_vals.append(sol.y.copy())
 
-        # equilibrium / energy tests
-        if sol.t >= 100:
-            print("Slow convergence")
-            slow_convergence = True
-            break
         if (
             max(
                 vector_of_magnitudes(
@@ -303,11 +294,25 @@ def BDF_timestepper_dilation(
             print("Equilibrium achieved")
             break
 
+        # equilibrium
+        if sol.t >= 100:
+            print("Slow convergence")
+            slow_convergence = True
+            print(
+                max(
+                    vector_of_magnitudes(
+                        np.reshape(scipy_fun(None, sol.y), (np.shape(incidence_matrix)[1], 2))
+                    )
+                )
+            )
+            break
+
     # Some networks contain edges or structures that are stiff and require stricter error
     # tolerances for the RK23 scheme to converge to a mechanical equilibrium.
     # However these stricter error tolerances also increase the computational cost
     # of the scheme to we implement a test to only increase the tolerance when required.
     if increasing_energy or slow_convergence:
+        hundereds_count = 0
         sol = sp.integrate.BDF(
             scipy_fun,
             t_vals[-1],
@@ -322,7 +327,7 @@ def BDF_timestepper_dilation(
         while True:
             sol.step()
             if sol.status in ("finished", "failed"):
-                print("Equilibrium achieved/failed")
+                print("Equilibrium failed")
                 break
 
             t_vals.append(sol.t)
@@ -337,52 +342,25 @@ def BDF_timestepper_dilation(
             ):
                 print("Equilibrium achieved")
                 break
-            if sol.t >= 200:
-                print("Equilibrium not achieved in 200 tau")
+            if sol.t >= 100 * (2 + hundereds_count):
+                print("Equilibrium not achieved in {} tau".format(100 * (2 + hundereds_count)))
+                hundereds_count += 1
 
     ###############
     t_vals = [0] + t_vals
-    energy_vals = [energy_calc(y)]
-    norm_vals = [np.linalg.norm(scipy_fun(None, y))]
-    for i in range(np.shape(y_vals)[0]):
-        energy_vals.append(energy_calc(y_vals[i]))
-        norm_vals.append(np.linalg.norm(scipy_fun(None, y_vals[i])))
-
-    top_nodes = []
-
-    bot_nodes = []
-
-    left_nodes = []
-
-    right_nodes = []
-
-    for i in range(len(nodes[boundary_nodes:])):
-        if abs(nodes[i + boundary_nodes][1] - L) <= 1e-15:
-            top_nodes.append(i + boundary_nodes)
-        if abs(nodes[i + boundary_nodes][1] - 0) <= 1e-15:
-            bot_nodes.append(i + boundary_nodes)
-        if abs(nodes[i + boundary_nodes][0] - 0) <= 1e-15:
-            left_nodes.append(i + boundary_nodes)
-        if abs(nodes[i + boundary_nodes][0] - L) <= 1e-15:
-            right_nodes.append(i + boundary_nodes)
-
-    force_all = boundary_force(y_vals[-1])
-
-    force_top = np.array([force_all[item] for item in top_nodes])
-
-    force_bot = np.array([force_all[item] for item in bot_nodes])
-
-    force_left = np.array([force_all[item] for item in left_nodes])
-
-    force_right = np.array([force_all[item] for item in right_nodes])
+    energy_vals = [energy_calc(y)] + [energy_calc(item) for item in y_vals]
+    norm_vals = [np.linalg.norm(scipy_fun(None, y))] + [
+        np.linalg.norm(scipy_fun(None, item)) for item in y_vals
+    ]
 
     y_output = np.reshape(y_vals[-1], (np.shape(incidence_matrix)[1], 2))
-    if (
-        Plot_networks
-        and np.linalg.norm(
-            vector_of_magnitudes(incidence_matrix.dot(y_output)) / initial_lengths - 1
+    if Plot_networks and (
+        max(
+            vector_of_magnitudes(
+                np.reshape(scipy_fun(None, y_output), (np.shape(incidence_matrix)[1], 2))
+            )
         )
-        > 1e-12
+        < 1e-4
     ):
 
         try:
@@ -397,18 +375,10 @@ def BDF_timestepper_dilation(
             )
         except IndexError or ZeroDivisionError or ValueError:
             pass
-    # print(
-    #     "Time taken till relaxation for shear factor =",
-    #     shear_factor,
-    #     "is",
-    #     time.time() - start_time,
-    #     "s",
-    # )
 
     return (
-        [force_top, force_bot, force_left, force_right],
         [t_vals, norm_vals],
-        y_output,  # The nodes in equilibrium positions
+        y_output,
         energy_vals,
     )
 

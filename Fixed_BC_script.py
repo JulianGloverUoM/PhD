@@ -645,7 +645,7 @@ def Create_pbc_Network(
     boundary_nodes = num_nodes - count_of_swapped_nodes + 1
 
     return (
-        nodes,
+        np.array(nodes),
         boundary_nodes,
         incidence_matrix_csr,
     )

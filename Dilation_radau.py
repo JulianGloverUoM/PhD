@@ -27,7 +27,7 @@ from datetime import date
 
 
 def dilation_deformation(input_nodes, Lambda_1, Lambda_2):
-    return np.array([np.array([[Lambda_1, 0], [0, Lambda_2]]).dot(item) for item in input_nodes])
+    return input_nodes * np.array([Lambda_1, Lambda_2])
 
 
 def invert_dilation(input_nodes, Lambda_1, Lambda_2):
