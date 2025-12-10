@@ -321,3 +321,18 @@ def benchmark_solvers(
     # Sort for readability
     df = df.sort_values(["L", "density", "seed", "solver"]).reset_index(drop=True)
     return df
+
+
+def run_once():
+    L_values = [2, 3, 4]
+    density_values = [4, 6]
+    seeds = [0, 1, 2]
+
+    df = benchmark_solvers(L_values, density_values, seeds, Lambda_1=1.2, Lambda_2=1.2)
+    print(df)
+    with open("profling_output.dat", "wb") as f:
+        pickle.dump(df, f)
+
+
+if __name__ == "__main__":
+    run_once()
