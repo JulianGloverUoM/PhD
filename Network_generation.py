@@ -854,7 +854,14 @@ def ColormapPlot_dilation(
     plotted_quantity_name="Plotted Quantity",
     density=None,
     linewidth=0.5,
-    cmap="seismic",
+    cmap=mcol.LinearSegmentedColormap.from_list(
+        "network_stretch",
+        [
+            (0.00, "#0000FF"),  # blue
+            # (0.50, "#8000FF"),  # purple
+            (1.00, "#FF0000"),  # red
+        ],
+    ),
     robust_colour_limits=True,
     save_path=None,
 ):
@@ -993,3 +1000,53 @@ def Generate_NetworkPlot(
     plt.show()
 
     return nodes, boundary_nodes, incidence_matrix
+
+
+def NetworkPlot(
+    L,
+    nodes,
+    boundary_nodes,
+    incidence_matrix,
+    linewidth=0.5,
+    edge_colour="black",
+    boundary_colour="black",
+    save_path=None,
+):
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    # Fast edge-node extraction.
+    # Assumes each row of incidence_matrix has exactly two nonzero entries.
+    edge_nodes = incidence_matrix.indices.reshape(incidence_matrix.shape[0], 2)
+
+    segments = np.stack(
+        [
+            nodes[edge_nodes[:, 0]],
+            nodes[edge_nodes[:, 1]],
+        ],
+        axis=1,
+    )
+
+    line_collection = LineCollection(
+        segments,
+        colors=edge_colour,
+        linewidths=linewidth,
+    )
+
+    ax.add_collection(line_collection)
+
+    # Domain boundary.
+    ax.plot(
+        [0, L, L, 0, 0],
+        [0, 0, L, L, 0],
+        color=boundary_colour,
+        linewidth=1.0,
+    )
+
+    ax.set_aspect("equal")
+    ax.set_xlim(-0.1 * L, 1.1 * L)
+    ax.set_ylim(-0.1 * L, 1.1 * L)
+
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
+
+    plt.show()

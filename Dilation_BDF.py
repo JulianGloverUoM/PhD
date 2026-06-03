@@ -223,6 +223,17 @@ def BDF_timestepper_dilation(
         f_jk[boundary_nodes:] = 0
         return -f_jk.ravel(order="C")
 
+    def boundary_force(t, y):
+        matrix_y = y.reshape(num_nodes, 2)
+        l_j = incidence_matrix.dot(matrix_y)
+        l_j_lengths = np.linalg.norm(l_j, axis=1)
+        l_j_hat = l_j / l_j_lengths[:, None]
+        stretches = l_j_lengths * inv_initial_lengths
+        F_j = law.force(stretches)
+        product = l_j_hat * F_j[:, None]
+        f_jk = incidence_matrix_T.dot(product)
+        return -f_jk
+
     def energy_calc(y):
         matrix_y = y.reshape(num_nodes, 2)
         l_j = incidence_matrix.dot(matrix_y)
@@ -387,8 +398,43 @@ def BDF_timestepper_dilation(
                 print("Equilibrium not achieved in {} tau".format(100 * (2 + hundereds_count)))
                 hundereds_count += 1
 
+    top_nodes = []
+
+    bot_nodes = []
+
+    left_nodes = []
+
+    right_nodes = []
+
+    for i in range(len(nodes[boundary_nodes:])):
+        if abs(nodes[i + boundary_nodes][1] - L) <= 1e-15:
+            top_nodes.append(i + boundary_nodes)
+        if abs(nodes[i + boundary_nodes][1] - 0) <= 1e-15:
+            bot_nodes.append(i + boundary_nodes)
+        if abs(nodes[i + boundary_nodes][0] - 0) <= 1e-15:
+            left_nodes.append(i + boundary_nodes)
+        if abs(nodes[i + boundary_nodes][0] - L) <= 1e-15:
+            right_nodes.append(i + boundary_nodes)
+
+    force_all = boundary_force(0, y_val)
+
+    force_top = np.array([force_all[item] for item in top_nodes])
+
+    force_bot = np.array([force_all[item] for item in bot_nodes])
+
+    force_left = np.array([force_all[item] for item in left_nodes])
+
+    force_right = np.array([force_all[item] for item in right_nodes])
+
     y_output = y_val.reshape(num_nodes, 2)
-    if Plot_networks and (max_force < 1e-4):
+    if Plot_networks and (Lambda_1 == 1 and Lambda_2 == 1):
+        Network_generation.NetworkPlot(
+            L,
+            y_output,
+            boundary_nodes,
+            incidence_matrix,
+        )
+    elif Plot_networks and (max_force < 1e-4):
         try:
             stretches = vector_of_magnitudes(incidence_matrix @ y_output) / initial_lengths
             Network_generation.ColormapPlot_dilation(
@@ -398,11 +444,12 @@ def BDF_timestepper_dilation(
                 Lambda_1,
                 Lambda_2,
                 stretches,
-                r"$\lambda_j$",
+                r"$\lambda$",
             )
         except (IndexError, ZeroDivisionError, ValueError):
             pass
     return (
+        [force_top, force_bot, force_left, force_right],
         [t_vals, norm_vals],
         y_output,
         energy_vals,
@@ -846,7 +893,7 @@ def run_once():
     Lambda_1 = 2.8
     Lambda_2 = 2.8
 
-    (nodes, boundary_nodes, incidence_matrix) = Fixed_BC_script.Create_pbc_Network(
+    (nodes, boundary_nodes, incidence_matrix) = Network_generation.Create_pbc_Network(
         L,
         density,
         seed,
