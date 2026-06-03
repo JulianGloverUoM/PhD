@@ -1,37 +1,268 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Created on Mon Feb  3 14:08:06 2025
-
-@author: v17847jg
-"""
-
-# -*- coding: utf-8 -*-
 
 # Script to generate a PBC network with data structure in compliance with requirements for solving
 # for equilibrium positions using dispersive energy ODE method.
 
-# get bent Rupinder Matharu
+# get bent Rupinder Matharu <3
 
+from dataclasses import dataclass
 import random
 import math
 import numpy as np
-import matplotlib as mpl
-import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 import matplotlib.colors as mcol
-import matplotlib.cm as cm
-import scipy as sp
-import scipy.stats as stats
+import matplotlib.pyplot as plt
 from scipy.sparse import lil_matrix
-from datetime import date
 import copy
-import time
 import os
 import sys
 import pickle
 
 file_path = os.path.realpath(__file__)
 sys.path.append(file_path)
+
+#############################################################################
+#############################################################################
+
+
+@dataclass(frozen=True)
+class Network_Law:
+    name: str
+    propose_edge: callable
+
+
+def fibre_angle(edge):
+    dx = edge[1][0] - edge[0][0]
+    dy = edge[1][1] - edge[0][1]
+    return np.mod(np.arctan2(dy, dx), np.pi)
+
+
+def point_segment_distance(point, segment_start, segment_end):
+    point = np.asarray(point, dtype=float)
+    segment_start = np.asarray(segment_start, dtype=float)
+    segment_end = np.asarray(segment_end, dtype=float)
+
+    segment = segment_end - segment_start
+    seg_len_sq = np.dot(segment, segment)
+
+    if seg_len_sq == 0:
+        return np.linalg.norm(point - segment_start)
+
+    t = np.clip(
+        np.dot(point - segment_start, segment) / seg_len_sq,
+        0.0,
+        1.0,
+    )
+
+    closest = segment_start + t * segment
+
+    return np.linalg.norm(point - closest)
+
+
+def initialise_segment_grid(L):
+    # The deposited fibres have length 1, so we use a grid with unit square cells.
+    if int(L) != L:
+        raise ValueError("The segment grid assumes that L is an integer.")
+
+    L = int(L)
+
+    return [[[] for j in range(L)] for i in range(L)]
+
+
+def grid_cell(point, L):
+    L = int(L)
+    point = np.mod(point, L)
+
+    return int(point[0]) % L, int(point[1]) % L
+
+
+def segment_grid_cells(segment, L):
+    # Returns all grid cells touched by the bounding box of a segment.
+    # This over-counts slightly, but keeps the code simple and safe.
+    L = int(L)
+
+    segment_start = np.asarray(segment[0], dtype=float)
+    segment_end = np.asarray(segment[1], dtype=float)
+
+    x_min = min(segment_start[0], segment_end[0])
+    x_max = max(segment_start[0], segment_end[0])
+    y_min = min(segment_start[1], segment_end[1])
+    y_max = max(segment_start[1], segment_end[1])
+
+    i_min = max(0, int(np.floor(x_min)))
+    i_max = min(L - 1, int(np.floor(x_max - 1e-15)))
+    j_min = max(0, int(np.floor(y_min)))
+    j_max = min(L - 1, int(np.floor(y_max - 1e-15)))
+
+    cells = []
+
+    for i in range(i_min, i_max + 1):
+        for j in range(j_min, j_max + 1):
+            cells.append((i, j))
+
+    # Add endpoint cells as well, which helps with segments lying exactly on a boundary.
+    cells.append(grid_cell(segment_start, L))
+    cells.append(grid_cell(segment_end, L))
+
+    return list(set(cells))
+
+
+def add_segment_to_grid(segment_grid, segment, L):
+    for i, j in segment_grid_cells(segment, L):
+        segment_grid[i][j].append(segment)
+
+    return
+
+
+def nearby_segments(seed, segment_grid, L, search_radius):
+    # Returns possible nearby segments, using periodic indexing of the unit-cell grid.
+    # The final distance check is still done exactly by point_segment_distance_periodic.
+    L = int(L)
+    centre_i, centre_j = grid_cell(seed, L)
+    cell_range = max(1, int(np.ceil(search_radius)))
+
+    output = []
+    used_segments = set()
+
+    for di in range(-cell_range, cell_range + 1):
+        for dj in range(-cell_range, cell_range + 1):
+            i = (centre_i + di) % L
+            j = (centre_j + dj) % L
+
+            for segment in segment_grid[i][j]:
+                segment_id = id(segment)
+
+                if segment_id not in used_segments:
+                    output.append(segment)
+                    used_segments.add(segment_id)
+
+    return output
+
+
+def nearby_segments_with_shifts(seed, segment_grid, L, search_radius):
+    # Returns possible nearby segments, together with the periodic shift needed to compare
+    # them with the candidate seed.
+    L = int(L)
+
+    centre_i, centre_j = grid_cell(seed, L)
+    cell_range = max(1, int(np.ceil(search_radius)))
+
+    output = []
+    used_segments = set()
+
+    for di in range(-cell_range, cell_range + 1):
+        for dj in range(-cell_range, cell_range + 1):
+            raw_i = centre_i + di
+            raw_j = centre_j + dj
+
+            i = raw_i % L
+            j = raw_j % L
+
+            # If the neighbouring cell has wrapped around the periodic boundary,
+            # shift the segment back into the local image of the seed.
+            shift = np.array(
+                [
+                    (raw_i - i) * L,
+                    (raw_j - j) * L,
+                ],
+                dtype=float,
+            )
+
+            for segment in segment_grid[i][j]:
+                segment_id = id(segment)
+
+                if segment_id not in used_segments:
+                    output.append((segment, shift))
+                    used_segments.add(segment_id)
+
+    return output
+
+
+def add_line_index_to_grid(segment_grid, line_index, segment, L):
+    for i, j in segment_grid_cells(segment, L):
+        segment_grid[i][j].append(line_index)
+
+    return
+
+
+def nearby_line_indices(segment, segment_grid, L):
+    # Returns indices of lines whose bounding-box cells overlap with the current segment.
+    # If two segments intersect, their bounding boxes overlap, so checking shared cells is enough.
+    L = int(L)
+
+    output = []
+    used_indices = set()
+
+    for i, j in segment_grid_cells(segment, L):
+        for line_index in segment_grid[i][j]:
+            if line_index not in used_indices:
+                output.append(line_index)
+                used_indices.add(line_index)
+
+    output.sort()
+
+    return output
+
+
+def make_network_law(key, matern_radius=0.1, max_attempts=10000):
+    if key == "Uniform":
+        return Network_Law(
+            name="Uniform",
+            propose_edge=lambda L, accepted_segments, rng: random_edge_uniform(L, rng),
+        )
+
+    elif key == "Matern":
+        if matern_radius <= 0:
+            raise ValueError("matern_radius must be positive.")
+
+        def propose_edge(L, accepted_segments, rng):
+            for _ in range(max_attempts):
+                candidate = random_edge_uniform(L, rng)
+                seed = candidate[0]
+
+                candidate_segments = nearby_segments_with_shifts(
+                    seed,
+                    accepted_segments,
+                    L,
+                    matern_radius,
+                )
+
+                if len(candidate_segments) == 0:
+                    return candidate
+
+                min_distance = np.inf
+
+                for segment, shift in candidate_segments:
+                    distance = point_segment_distance(
+                        seed,
+                        np.asarray(segment[0]) + shift,
+                        np.asarray(segment[1]) + shift,
+                    )
+
+                    if distance < min_distance:
+                        min_distance = distance
+
+                if min_distance >= matern_radius:
+                    return candidate
+
+                rejection_probability = 1.0 - min_distance / matern_radius
+
+                if rng.random() >= rejection_probability:
+                    return candidate
+
+            raise RuntimeError(
+                "Could not place a fibre under the Matern rule. "
+                "Try reducing matern_radius, reducing density, or increasing max_attempts."
+            )
+
+        return Network_Law(
+            name=f"Matern_radius_{matern_radius}",
+            propose_edge=propose_edge,
+        )
+
+    else:
+        raise ValueError(f"Unknown network law: {key}")
 
 
 #############################################################################
@@ -49,24 +280,23 @@ def intersect(A, B, C, D):
 #############################################################################
 #############################################################################
 
+# Creates list with start and end coordinates of a unit line, given a seed position and angle.
 
-# Creates list with start and end coordinates of a unit line
 
+def edge_from_seed_angle(seed, theta):
+    initial_x, initial_y = seed
 
-def random_edge_uniform(L):
-    # Get coordinates of a random node in the box [0, L] x [0, L]
-    initial_x = random.uniform(0, L)
-    initial_y = random.uniform(0, L)
-
-    # Obtain a random angle from 0 to pi
-    theta = random.uniform(0, math.pi)
-
-    # Obtain end points of the edge
     end_x = initial_x + math.cos(theta)
     end_y = initial_y + math.sin(theta)
 
-    # Return the node positions
     return [[initial_x, initial_y], [end_x, end_y]]
+
+
+def random_edge_uniform(L, rng=random):
+    seed = [rng.uniform(0, L), rng.uniform(0, L)]
+    theta = rng.uniform(0, math.pi)
+
+    return edge_from_seed_angle(seed, theta)
 
 
 # takes in arrays defining line segments and returns itersection points
@@ -164,27 +394,6 @@ def apply_pbc(node_1, node_2, L):
 #############################################################################
 #############################################################################
 
-# Normalises the rows of an array
-
-
-def normalise_elements(A):
-    norms = np.linalg.norm(A, axis=1, keepdims=True)
-    return A / norms
-
-
-# Takes in a array and outputs the magnitudes of the rows in the array
-
-
-def vector_of_magnitudes(A):
-    return np.linalg.norm(A, axis=1)
-
-
-# Computes the forbenius norm of a matrix, more efficient than inbuilt np.linalg.norm function
-
-
-def frobenius_norm(A):
-    return np.linalg.norm(A)
-
 
 def trim_rows(matrix, min_nonzeros):
     non_empty_rows = []
@@ -225,18 +434,6 @@ def trim_nodes(matrix, min_nonzeros, nodes, L):
     return new_matrix, removed_indices
 
 
-def permute_sparse_matrix(M, new_row_order=None, new_col_order=None):
-    if new_row_order is None and new_col_order is None:
-        return M
-
-    new_M = M
-    if new_row_order is not None:
-        new_M = new_M[new_row_order, :]
-    if new_col_order is not None:
-        new_M = new_M[:, new_col_order]
-    return new_M
-
-
 #############################################################################
 #############################################################################
 
@@ -245,8 +442,18 @@ def Create_pbc_Network(
     L,
     density,
     seed,
+    Network_law="Uniform",
+    matern_radius=0.2,
+    max_attempts=10_000,
 ):  # positions_distribution="uniform", orientation_distribrution="uniform"):
-    random.seed(seed)
+
+    rng = random.Random(seed)
+
+    network_law = make_network_law(
+        Network_law,
+        matern_radius=matern_radius,
+        max_attempts=max_attempts,
+    )
 
     lines = []
     nodes = []
@@ -257,21 +464,31 @@ def Create_pbc_Network(
 
     N = int(5.637 * density * L**2)
 
-    for i in range(N):  # generate a bunch of line segements under PBC
-        line = random_edge_uniform(L)
-        original_line = copy.deepcopy(line)
+    accepted_segments = initialise_segment_grid(L)
 
-        line = apply_pbc(line[0], line[1], L)
-        if line != original_line:
-            for j in range(len(line)):
+    for i in range(N):
+        candidate = network_law.propose_edge(L, accepted_segments, rng)
+
+        pbc_segments = apply_pbc(candidate[0], candidate[1], L)
+
+        for segment in pbc_segments:
+            add_segment_to_grid(accepted_segments, segment, L)
+
+        if len(pbc_segments) > 1:
+            for j in range(len(pbc_segments)):
                 line_is_on_boundary.append(1)
         else:
             line_is_on_boundary.append(0)
 
-        lines = lines + line
+        lines = lines + pbc_segments
 
     lines = [np.array(item) for item in lines]
     nodes = [item for line in lines for item in line]
+
+    line_grid = initialise_segment_grid(L)
+
+    for line_index, line in enumerate(lines):
+        add_line_index_to_grid(line_grid, line_index, line, L)
 
     intersections = []
     intersections_ordering = []  # order of when lines intersect with eachother
@@ -305,7 +522,14 @@ def Create_pbc_Network(
 
         # Run intersection check over other elements of the list ignoring duplicates
 
-        for (line_index, other_line) in enumerate(lines[current_line_index + 1 :]):
+        line_indices = nearby_line_indices(current_line, line_grid, L)
+
+        for other_line_index in line_indices:
+            if other_line_index <= current_line_index:
+                continue
+
+            other_line = lines[other_line_index]
+
             if intersect(current_line[0], current_line[1], other_line[0], other_line[1]):
 
                 # For efficiency we loop over i,j>i, and when line i intersects line j, we record
@@ -313,19 +537,15 @@ def Create_pbc_Network(
 
                 # Find out which lines intersect each other and store pairs of indices
 
-                intersections[current_line_index].append(
-                    [current_line_index, current_line_index + line_index + 1]
-                )
-                intersections[current_line_index + line_index + 1].append(
-                    [current_line_index + line_index + 1, current_line_index]
-                )
+                intersections[current_line_index].append([current_line_index, other_line_index])
+                intersections[other_line_index].append([other_line_index, current_line_index])
 
                 # Compute coordinates of the crosslink and store it
 
                 crosslink = intersection_line(current_line, other_line)
 
                 crosslink_coordinates[current_line_index].append(crosslink)
-                crosslink_coordinates[current_line_index + line_index + 1].append(crosslink)
+                crosslink_coordinates[other_line_index].append(crosslink)
 
                 # Find distance from start of the line to *this* crosslink and add to a list
 
@@ -537,7 +757,7 @@ def Create_pbc_Network(
                 else:
                     edge_is_on_boundary.append(0)
 
-    # Here we create the initial incidence matrix and set it up, although it contains boundary nodes.
+    # Here we create the initial incidence matrix, although it contains boundary nodes.
     incidence_matrix = lil_matrix((len(edges), len(nodes)))
     for i in range(len(edges)):
         index_1 = unsigned_incidence_matrix_list[2 * i]
@@ -554,8 +774,8 @@ def Create_pbc_Network(
     # could be done in a single pass of the incidence matrix, but as deleting an item may lead to a
     # new item requiring deletion, its easier to just pass over the list multiple times.
     # A technically more efficient code may be to identify and check if a edges deletion should
-    # result in new edges and nodes being deleted, but doing so would require some form of recursion,
-    # and the code would be more prone to bugs and harder to maintain.
+    # result in new edges and nodes being deleted, but doing so would require some form of
+    # recursion, and the code would be more prone to bugs and harder to maintain.
     # Instead we use a while loop, run over the incidence matrix, delete edges and nodes as they
     # arise, and then loop over the incidence matrix repeated until nothing is deleted, then halts.
     trimming = True
@@ -586,28 +806,33 @@ def Create_pbc_Network(
             incidence_matrix_csr = incidence_matrix.tocsr()
             trimming = False
 
-    nodes_copy = copy.deepcopy(nodes)
-    count_of_swapped_nodes = 1
-    num_nodes = len(nodes)
-    new_col_order = [i for i in range(num_nodes)]
-    for i, node in enumerate(nodes_copy):
-        if any([abs(item - 0) <= 1e-15 for item in node]) or any(
-            [abs(item - L) <= 1e-15 for item in node]
-        ):
-            swapped_index = num_nodes - count_of_swapped_nodes
-            nodes[swapped_index] = node
-            nodes[i] = nodes_copy[swapped_index]
+    # Move boundary nodes to the end of the node list.
+    # This is done after trimming, so that boundary_nodes gives the first boundary-node index.
+    nodes = np.asarray(nodes)
 
-            new_col_order[i] = swapped_index
-            new_col_order[swapped_index] = i
+    boundary_tol = 1e-15
 
-            count_of_swapped_nodes += 1
+    boundary_node_mask = np.any(
+        (np.abs(nodes) <= boundary_tol) | (np.abs(nodes - L) <= boundary_tol),
+        axis=1,
+    )
 
-    incidence_matrix = permute_sparse_matrix(incidence_matrix, None, new_col_order)
+    interior_node_indices = np.flatnonzero(~boundary_node_mask)
+    boundary_node_indices = np.flatnonzero(boundary_node_mask)
 
-    incidence_matrix_csr = incidence_matrix.tocsr()
+    new_col_order = np.concatenate(
+        [
+            interior_node_indices,
+            boundary_node_indices,
+        ]
+    )
 
-    boundary_nodes = num_nodes - count_of_swapped_nodes + 1
+    nodes = nodes[new_col_order]
+
+    # Column slicing is faster in CSC format.
+    incidence_matrix_csr = incidence_matrix.tocsc()[:, new_col_order].tocsr()
+
+    boundary_nodes = len(interior_node_indices)
 
     return (
         np.array(nodes),
@@ -627,124 +852,144 @@ def ColormapPlot_dilation(
     Lambda_2,
     plotted_quantity,
     plotted_quantity_name="Plotted Quantity",
+    density=None,
+    linewidth=0.5,
+    cmap="seismic",
+    robust_colour_limits=True,
+    save_path=None,
 ):
+    plotted_quantity = np.asarray(plotted_quantity)
 
-    cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
-    cnorm = mcol.Normalize(vmin=min(plotted_quantity), vmax=max(plotted_quantity))
-    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
-    cpick.set_array([])
-    fig = plt.figure()
+    fig, ax = plt.subplots(figsize=(7, 6))
 
-    # if Lambda_1 == Lambda_2:
-    #     plt.title(str(r"$\Lambda, L, \rho$ = {}, {}, {}".format(1.2, L, density)))
-    # else:
-    #     plt.title(str(r"$\Lambda_1,\Lambda_2$ = {},{}".format(Lambda_1, Lambda_2)))
+    # Fast edge-node extraction.
+    # This assumes each row of incidence_matrix has exactly two nonzero entries.
+    edge_nodes = incidence_matrix.indices.reshape(incidence_matrix.shape[0], 2)
 
-    plt.title(str(r"$L = {}, \rho = {}$".format(L, 6)))
-    plt.gca().set_aspect("equal")
+    segments = np.stack(
+        [
+            nodes[edge_nodes[:, 0]],
+            nodes[edge_nodes[:, 1]],
+        ],
+        axis=1,
+    )
 
-    new_edges = []
-    for row in range(incidence_matrix.shape[0]):
-        index_1, index_2 = incidence_matrix.getrow(row).indices
-        node_1 = nodes[index_1]
-        node_2 = nodes[index_2]
-        new_edges.append([node_1, node_2])
+    if robust_colour_limits:
+        vmin, vmax = np.percentile(plotted_quantity, [1, 99])
+    else:
+        vmin, vmax = np.min(plotted_quantity), np.max(plotted_quantity)
 
-    for i in range(len(new_edges)):
-        edge = new_edges[i]
+    norm = mcol.Normalize(vmin=vmin, vmax=vmax)
 
-        plt.plot(
-            [edge[0][0], edge[1][0]],
-            [edge[0][1], edge[1][1]],
-            color=cpick.to_rgba(plotted_quantity[i]),
-            linewidth=0.5,
-        )
+    line_collection = LineCollection(
+        segments,
+        array=plotted_quantity,
+        cmap=cmap,
+        norm=norm,
+        linewidths=linewidth,
+    )
 
-    plt.plot(
+    ax.add_collection(line_collection)
+
+    # Plot deformed domain boundary.
+    ax.plot(
         [0, Lambda_1 * L, Lambda_1 * L, 0, 0],
         [0, 0, Lambda_2 * L, Lambda_2 * L, 0],
-    )
-    ax = plt.gca()
-
-    plt.xlim(0 - 0.1 * L, 1.1 * Lambda_1 * L)
-    plt.ylim(0 - 0.1 * L, 1.1 * Lambda_2 * L)
-
-    cax = fig.add_axes([0.85, 0.25, 0.05, 0.5])
-    cbar = plt.colorbar(
-        cpick,
-        cax=cax,
-        boundaries=np.arange(
-            min(plotted_quantity),
-            max(plotted_quantity),
-            min((max(plotted_quantity) - min(plotted_quantity)) / 100, 100),
-        ),
+        color="black",
+        linewidth=1.0,
     )
 
-    # Set title above colorbar
-    cax.set_title(plotted_quantity_name)
+    ax.set_aspect("equal")
 
-    # plt.savefig("Colourmap_stretch_Lambda1_1_2_Lambda2_1_2_L_{}_rho_{}_seed_0.pdf".format(L, 6))
+    ax.set_xlim(-0.1 * L, 1.1 * Lambda_1 * L)
+    ax.set_ylim(-0.1 * L, 1.1 * Lambda_2 * L)
+
+    if density is None:
+        ax.set_title(r"$L = {}$".format(L))
+    else:
+        ax.set_title(r"$L = {}, \rho = {}$".format(L, density))
+
+    cbar = fig.colorbar(
+        line_collection,
+        ax=ax,
+        fraction=0.046,
+        pad=0.04,
+    )
+    cbar.set_label(plotted_quantity_name)
+
+    fig.tight_layout()
+
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
 
     plt.show()
 
-    return
+    return fig, ax
 
 
-def Generate_NetworkPlot(L, density, seed):
-    (
-        nodes,
-        boundary_nodes,
-        incidence_matrix,
-    ) = Create_pbc_Network(L, density, seed)
-    initial_lengths = vector_of_magnitudes(incidence_matrix.dot(nodes))
-    plotted_quantity = initial_lengths
-    # cm1 = mcol.LinearSegmentedColormap.from_list("bpr", ["b", "r"])
-    cm1 = mcol.LinearSegmentedColormap.from_list("grey_black", ["lightgrey", "black"])
-    cnorm = mcol.Normalize(vmin=min(plotted_quantity), vmax=max(plotted_quantity))
-    cpick = cm.ScalarMappable(norm=cnorm, cmap=cm1)
-    cpick.set_array([])
-    fig = plt.figure()
-    plt.title(r"$L = {}, \rho = {}$".format(int(L), int(density)))
-    plt.gca().set_aspect("equal")
+def Generate_NetworkPlot(
+    L,
+    density,
+    seed,
+    Network_law="Uniform",
+    matern_radius=0.2,
+    max_attempts=10000,
+    linewidth=0.5,
+    edge_colour="black",
+    boundary_colour="black",
+    save_path=None,
+):
+    nodes, boundary_nodes, incidence_matrix = Create_pbc_Network(
+        L,
+        density,
+        seed,
+        Network_law,
+        matern_radius,
+        max_attempts,
+    )
 
-    new_edges = []
-    for row in range(incidence_matrix.shape[0]):
-        index_1, index_2 = incidence_matrix.getrow(row).indices
-        node_1 = nodes[index_1]
-        node_2 = nodes[index_2]
-        new_edges.append([node_1, node_2])
+    fig, ax = plt.subplots(figsize=(6, 6))
 
-    for i in range(len(new_edges)):
-        edge = new_edges[i]
+    # Fast edge-node extraction.
+    # Assumes each row of incidence_matrix has exactly two nonzero entries.
+    edge_nodes = incidence_matrix.indices.reshape(incidence_matrix.shape[0], 2)
 
-        plt.plot(
-            [edge[0][0], edge[1][0]],
-            [edge[0][1], edge[1][1]],
-            color=cpick.to_rgba(plotted_quantity[i]),
-            linewidth=0.5,
-        )
+    segments = np.stack(
+        [
+            nodes[edge_nodes[:, 0]],
+            nodes[edge_nodes[:, 1]],
+        ],
+        axis=1,
+    )
 
-    plt.plot(
+    line_collection = LineCollection(
+        segments,
+        colors=edge_colour,
+        linewidths=linewidth,
+    )
+
+    ax.add_collection(line_collection)
+
+    # Domain boundary.
+    ax.plot(
         [0, L, L, 0, 0],
         [0, 0, L, L, 0],
-    )
-    ax = plt.gca()
-    cax = fig.add_axes([0.85, 0.25, 0.05, 0.5])
-    cbar = plt.colorbar(
-        cpick,
-        cax=cax,
-        boundaries=np.arange(
-            min(plotted_quantity),
-            max(plotted_quantity),
-            min((max(plotted_quantity) - min(plotted_quantity)) / 100, 100),
-        ),
+        color=boundary_colour,
+        linewidth=1.0,
     )
 
-    # Set title above colorbar
-    cax.set_title(r"$l_j$")
+    ax.set_aspect("equal")
+    ax.set_xlim(-0.1 * L, 1.1 * L)
+    ax.set_ylim(-0.1 * L, 1.1 * L)
+    if Network_law == "Uniform":
+        ax.set_title(r"$L = {}, \rho = {}$".format(int(L), int(density)))
+    elif Network_law == "Matern":
+        ax.set_title(r"$L = {}, \rho = {}, r = {}$".format(int(L), int(density), matern_radius))
+    fig.tight_layout()
 
-    # plt.savefig("Colourmap_initial_edge_length_L_{}_rho_{}_seed_0.pdf".format(int(L), int(density)))
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight", dpi=300)
 
     plt.show()
 
-    return
+    return nodes, boundary_nodes, incidence_matrix

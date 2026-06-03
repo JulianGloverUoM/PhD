@@ -1,6 +1,7 @@
 # Testing script
 
 ######################################
+from dataclasses import dataclass
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -23,6 +24,70 @@ import time
 import itertools
 import numpy as np
 import pandas as pd
+
+######################################
+
+
+@dataclass(frozen=True)
+class Fibre_Law:
+    name: str
+    force: callable  # F(lambda)
+    energy: callable  # U(lambda, L0)
+    stiffness: callable  # dF(lambda)/dlambda
+
+
+def make_law(key, alpha=None):
+    if key == "Hookean_spring":
+        return Fibre_Law(
+            name="Hookean_spring",
+            force=lambda stretch: stretch - 1,
+            energy=lambda stretch, L_0: 0.5 * L_0 * (stretch - 1) ** 2,
+            stiffness=lambda stretch: 1,
+        )
+
+    elif key == "Neo_Hookean":  # example placeholder
+        return Fibre_Law(
+            name="Neo_Hookean",
+            force=lambda stretch: (1 / 3) * (stretch - stretch**-2),
+            energy=lambda stretch, L_0: (L_0 / 6) * (stretch**2 + 2 / stretch - 3),
+            stiffness=lambda stretch: (1 / 3) * (1 + 2 * stretch**-3),
+        )
+    elif key == "Soft_compression":
+        if alpha is None:
+            raise ValueError("Soft_compression requires alpha.")
+        if not (0.0 <= alpha < 1.0):
+            raise ValueError("Soft_compression requires 0 <= alpha < 1.")
+
+        return Fibre_Law(
+            name=f"Soft_compression_alpha_{alpha}",
+            force=lambda stretch: np.where(
+                stretch >= 1.0,
+                stretch - 1.0,
+                alpha * (stretch - 1.0),
+            ),
+            energy=lambda stretch, L_0: 0.5
+            * L_0
+            * np.where(
+                stretch >= 1.0,
+                (stretch - 1.0) ** 2,
+                alpha * (stretch - 1.0) ** 2,
+            ),
+            stiffness=lambda stretch: np.where(
+                stretch >= 1.0,
+                1,
+                alpha,
+            ),
+        )
+    elif key == "Log_law":  # example placeholder
+        return Fibre_Law(
+            name="Log_law",
+            force=lambda stretch: np.log(stretch),
+            energy=lambda stretch, L_0: L_0 * stretch * (np.log(stretch) - 1),
+            stiffness=lambda stretch: 1 / stretch,
+        )
+    else:
+        raise ValueError(f"Unknown fibre law: {key}")
+
 
 ######################################
 
@@ -57,6 +122,8 @@ def timestepper(
     Lambda_2,
     solver="BDF",
     Plot_networks=False,
+    Fibre_law="Hookean_spring",
+    alpha=0.1,
 ):
     if solver == "Radau":
         SolverClass = sp.integrate.Radau
@@ -64,8 +131,8 @@ def timestepper(
         SolverClass = sp.integrate.BDF
     else:
         raise ValueError(f"Unknown solver '{solver}', use 'Radau' or 'BDF'")
-
-    num_nodes = incidence_matrix.shape[1]
+    law = make_law(Fibre_law, alpha)
+    (num_edges, num_nodes) = incidence_matrix.shape
     inv_initial_lengths = 1.0 / initial_lengths
 
     def scipy_fun(t, y):
@@ -73,43 +140,110 @@ def timestepper(
         l_j = incidence_matrix.dot(matrix_y)
         l_j_lengths = np.linalg.norm(l_j, axis=1)
         l_j_hat = l_j / l_j_lengths[:, None]
-        F_j = l_j_lengths * inv_initial_lengths - 1.0
+        stretches = l_j_lengths * inv_initial_lengths
+        F_j = law.force(stretches)
         product = l_j_hat * F_j[:, None]
         f_jk = incidence_matrix.T.dot(product)
         f_jk[boundary_nodes:] = 0
         return -f_jk.ravel(order="C")
 
-    def energy_calc(y):
-        matrix_y = np.reshape(y, (np.shape(incidence_matrix)[1], 2))
+    def boundary_force(y):
+        matrix_y = y.reshape(num_nodes, 2)
         l_j = incidence_matrix.dot(matrix_y)
-        u_j = vector_of_magnitudes(l_j) - initial_lengths
-        return 0.5 * np.matmul(1 / initial_lengths, np.square(u_j))
+        l_j_lengths = np.linalg.norm(l_j, axis=1)
+        l_j_hat = l_j / l_j_lengths[:, None]
+        stretches = l_j_lengths * inv_initial_lengths
+        F_j = law.force(stretches)
+        product = l_j_hat * F_j[:, None]
+        f_jk = incidence_matrix.T.dot(product)
+        return -f_jk
 
-    def jac_sparsity_structure(y):
-        num_edges, num_nodes = np.shape(incidence_matrix)
-        hessian = lil_matrix((2 * num_nodes, 2 * num_nodes))
-        component = np.ones((2, 2))
+    def energy_calc(y):
+        matrix_y = y.reshape(num_nodes, 2)
+        l_j = incidence_matrix.dot(matrix_y)
+        l_j_lengths = np.linalg.norm(l_j, axis=1)
+        stretches = l_j_lengths * inv_initial_lengths
+        return np.sum(law.energy(stretches, initial_lengths))
 
+    def jacobian(t, y):
+        matrix_y = y.reshape(num_nodes, 2)
+
+        jac = lil_matrix((2 * num_nodes, 2 * num_nodes))
+
+        l_j = incidence_matrix.dot(matrix_y)
+        l_j_lengths = np.linalg.norm(l_j, axis=1)
+        l_j_hat = l_j / l_j_lengths[:, None]
+
+        l_j_hat_outer_products = l_j_hat[:, :, None] * l_j_hat[:, None, :]
+
+        stretches = l_j_lengths * inv_initial_lengths
+
+        F_j = law.force(stretches)
+        k_j = law.stiffness(stretches)
+
+        I_2 = np.eye(2)
+
+        hessian_components = -(
+            (F_j / l_j_lengths)[:, None, None] * I_2
+            + (k_j / initial_lengths - F_j / l_j_lengths)[:, None, None] * l_j_hat_outer_products
+        )
+
+        # This first loop computes the upper triangular off-diagonal blocks of the Jacobian.
         for edge in range(num_edges):
             i, k = incidence_matrix.getrow(edge).indices
+            component = hessian_components[edge]
+            # These checks incorporate the Neumann BCs. Note as we are calculating just the upper triangular block, i<k
+            # Hence if i is on the boundary k must be as well, if i is not a boundary node then k might be, in which
+            # case df_i/dr_k = 0 but df_k/dr_i =/= 0 so we calculate it.
             if i >= boundary_nodes:
                 continue
+
             if k >= boundary_nodes:
-                hessian[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
+                jac[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
                 continue
-            hessian[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
-            hessian[2 * k : 2 * k + 2, 2 * i : 2 * i + 2] = component
+
+            jac[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
+            jac[2 * k : 2 * k + 2, 2 * i : 2 * i + 2] = component
+
+        # We now compute the more complex diagonal entries
+        for node in range(boundary_nodes):
+            edge_indices = incidence_matrix[:, node].nonzero()[0]
+            i = 2 * node
+
+            jac[i : i + 2, i : i + 2] = -sum(hessian_components[edge] for edge in edge_indices)
+        return jac.tocsr()
+
+    # Effectively computes the Jacobian but with all potential non-zero elements = 1, which
+    # gives the sparsity structure of the Jacobian without having to do the expensive computation
+    def jac_sparsity_structure(y):
+        num_edges, num_nodes = np.shape(incidence_matrix)
+        jac = lil_matrix((2 * num_nodes, 2 * num_nodes))
+        component = np.ones((2, 2))
+        # if two edges are incident and one isnt a boundary node, make its local component's non-zero
+        for edge in range(num_edges):
+            i, k = incidence_matrix.getrow(edge).indices
+            # These checks incorporate the Neumann BCs. Note as we are calculating just the upper triangular block, i<k
+            # Hence if i is on the boundary k must be as well, if i is not a boundary node then k might be, in which
+            # case df_i/dr_k = 0 but df_k/dr_i =/= 0 so we calculate it.
+            if i >= boundary_nodes:
+                continue
+
+            if k >= boundary_nodes:
+                jac[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
+                continue
+
+            jac[2 * i : 2 * i + 2, 2 * k : 2 * k + 2] = component
+            jac[2 * k : 2 * k + 2, 2 * i : 2 * i + 2] = component
         # Make all diagonal entries non-zero, except the boundary nodes
         for node in range(boundary_nodes):
             i = 2 * node
-            hessian[i : i + 2, i : i + 2] = component
-        return hessian
+            jac[i : i + 2, i : i + 2] = component
+        return jac.tocsr()
+
+    # start_time = time.time()
 
     y = dilation_deformation(nodes, Lambda_1, Lambda_2)
     y = np.reshape(y, 2 * np.shape(y)[0], order="C")
-
-    y_vals = []
-    t_vals = []
 
     jac_structure = jac_sparsity_structure(y)
 
@@ -119,7 +253,7 @@ def timestepper(
     increasing_energy = False
     slow_convergence = False
 
-    max_tau = 1000.0
+    max_tau = 500.0
 
     sol = SolverClass(
         scipy_fun,
@@ -133,57 +267,67 @@ def timestepper(
         jac_sparsity=jac_structure,
     )
 
-    t_vals = [0.0]
-    y_vals = [y.copy()]
+    t_val = 0.0
+    y_val = y.copy()
+
+    t_old = None
+    y_old = None
+
+    max_force = np.inf
+
+    energy_val = energy_calc(y_val)
+    energy_vals = [energy_val]
+    norm_vals = [np.linalg.norm(scipy_fun(None, y_val))]
+    t_vals = [t_val]
 
     while True:
         sol.step()
+
         if sol.status in ("finished", "failed"):
             print("Equilibrium failed")
             break
 
-        if len(y_vals) > 2 and energy_calc(sol.y) > energy_calc(y_vals[-2]):
+        new_t = sol.t
+        new_y = sol.y.copy()
+        new_energy = energy_calc(new_y)
+
+        if y_old is not None and new_energy > energy_val:
             print("Energy increasing")
             increasing_energy = True
             break
 
-        t_vals.append(sol.t)
-        y_vals.append(sol.y.copy())
+        rhs = scipy_fun(None, new_y)
+        force_magnitudes = vector_of_magnitudes(rhs.reshape(num_nodes, 2))
+        max_force = np.max(force_magnitudes)
 
-        if (
-            max(
-                vector_of_magnitudes(
-                    np.reshape(scipy_fun(None, sol.y), (np.shape(incidence_matrix)[1], 2))
-                )
-            )
-            < 1e-4
-        ):
+        t_old = t_val
+        y_old = y_val
+
+        t_val = new_t
+        y_val = new_y
+        energy_val = new_energy
+
+        t_vals.append(t_val)
+        energy_vals.append(energy_val)
+        norm_vals.append(np.linalg.norm(rhs))
+
+        if max_force < 1e-4:
             print("Equilibrium achieved")
             break
 
-        # equilibrium
         if sol.t >= 100:
             print("Slow convergence")
             slow_convergence = True
-            print(
-                max(
-                    vector_of_magnitudes(
-                        np.reshape(scipy_fun(None, sol.y), (np.shape(incidence_matrix)[1], 2))
-                    )
-                )
-            )
+            print(max_force)
             break
 
-    # Some networks contain edges or structures that are stiff and require stricter error
-    # tolerances for the RK23 scheme to converge to a mechanical equilibrium.
-    # However these stricter error tolerances also increase the computational cost
-    # of the scheme to we implement a test to only increase the tolerance when required.
     if increasing_energy or slow_convergence:
         hundereds_count = 0
+
         sol = SolverClass(
             scipy_fun,
-            t_vals[-1],
-            y_vals[-1],
+            t_val,
+            y_val,
             max_tau,
             max_step=np.inf,
             rtol=1e-10,
@@ -191,65 +335,55 @@ def timestepper(
             jac=None,
             jac_sparsity=jac_structure,
         )
+
         while True:
             sol.step()
+
             if sol.status in ("finished", "failed"):
                 print("Equilibrium failed")
                 break
 
-            t_vals.append(sol.t)
-            y_vals.append(sol.y.copy())
-            if (
-                max(
-                    vector_of_magnitudes(
-                        np.reshape(scipy_fun(None, sol.y), (np.shape(incidence_matrix)[1], 2))
-                    )
-                )
-                < 1e-4
-            ):
+            new_t = sol.t
+            new_y = sol.y.copy()
+
+            rhs = scipy_fun(None, new_y)
+            force_magnitudes = vector_of_magnitudes(rhs.reshape(num_nodes, 2))
+            max_force = np.max(force_magnitudes)
+
+            t_old = t_val
+            y_old = y_val
+
+            t_val = new_t
+            y_val = new_y
+            energy_val = energy_calc(y_val)
+
+            t_vals.append(t_val)
+            energy_vals.append(energy_val)
+            norm_vals.append(np.linalg.norm(rhs))
+
+            if max_force < 1e-4:
                 print("Equilibrium achieved")
                 break
+
             if sol.t >= 100 * (2 + hundereds_count):
                 print("Equilibrium not achieved in {} tau".format(100 * (2 + hundereds_count)))
                 hundereds_count += 1
-                print(
-                    max(
-                        vector_of_magnitudes(
-                            np.reshape(scipy_fun(None, sol.y), (np.shape(incidence_matrix)[1], 2))
-                        )
-                    )
-                )
 
-    ###############
-    t_vals = [0] + t_vals
-    energy_vals = [energy_calc(y)] + [energy_calc(item) for item in y_vals]
-    norm_vals = [np.linalg.norm(scipy_fun(None, y))] + [
-        np.linalg.norm(scipy_fun(None, item)) for item in y_vals
-    ]
-
-    y_output = np.reshape(y_vals[-1], (np.shape(incidence_matrix)[1], 2))
-    if Plot_networks and (
-        max(
-            vector_of_magnitudes(
-                np.reshape(scipy_fun(None, y_output), (np.shape(incidence_matrix)[1], 2))
-            )
-        )
-        < 1e-4
-    ):
-
+    y_output = y_val.reshape(num_nodes, 2)
+    if Plot_networks and (max_force < 1e-4):
         try:
+            stretches = vector_of_magnitudes(incidence_matrix @ y_output) / initial_lengths
             Fixed_BC_script.ColormapPlot_dilation(
                 y_output,
                 incidence_matrix,
                 L,
                 Lambda_1,
                 Lambda_2,
-                ((vector_of_magnitudes(incidence_matrix.dot(y_output)) / initial_lengths) - 1),
-                r"$F_j$",
+                stretches,
+                r"$\lambda_j$",
             )
-        except IndexError or ZeroDivisionError or ValueError:
+        except (IndexError, ZeroDivisionError, ValueError):
             pass
-
     return (
         [t_vals, norm_vals],
         y_output,
@@ -324,14 +458,17 @@ def benchmark_solvers(
 
 
 def run_once():
-    L_values = [2, 3, 4]
-    density_values = [4, 6]
+    L_values = [
+        2,
+        4,
+    ]
+    density_values = [4]
     seeds = [0, 1, 2]
 
     df = benchmark_solvers(L_values, density_values, seeds, Lambda_1=1.2, Lambda_2=1.2)
     print(df)
-    with open("profling_output.dat", "wb") as f:
-        pickle.dump(df, f)
+    # with open("profiling_output.dat", "wb") as f:
+    #     pickle.dump(df, f)
 
 
 if __name__ == "__main__":
