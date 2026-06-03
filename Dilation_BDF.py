@@ -472,6 +472,7 @@ def Realisation_dilation(
     num_steps,
     Plot_stress_results=False,
     Plot_networks=False,
+    save_path=None,
 ):
     realisation_start_time = time.time()
     data = []
@@ -587,8 +588,10 @@ def Realisation_dilation(
                 density, fibre_lengths_multiplier, seed, max_Lambda_1, max_Lambda_2
             )
         )
-    with open(
-        "Dilation_BDF_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_".format(
+    if save_path is not None:
+        os.makedirs(save_path, exist_ok=True)
+
+        filename = "Dilation_BDF_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.dat".format(
             L,
             density,
             seed,
@@ -598,14 +601,20 @@ def Realisation_dilation(
             num_steps,
             Plot_stress_results,
             Plot_networks,
+            date.today(),
         )
-        + str(date.today())
-        + ".dat",
-        "wb",
-    ) as f:
-        pickle.dump(
-            (data, [p_top, p_bot, p_left, p_right], (nodes, initial_lengths, incidence_matrix)), f
-        )
+
+        full_save_path = os.path.join(save_path, filename)
+
+        with open(full_save_path, "wb") as f:
+            pickle.dump(
+                (
+                    data,
+                    [p_top, p_bot, p_left, p_right],
+                    (nodes, initial_lengths, incidence_matrix),
+                ),
+                f,
+            )
 
     print("Total Realisation time =", time.time() - realisation_start_time)
 
