@@ -516,8 +516,6 @@ def Realisation_dilation(
         seed,
     )
 
-    side_masks = boundary_node_side_masks(nodes, L)
-
     initial_lengths = fibre_lengths_multiplier * vector_of_magnitudes(incidence_matrix.dot(nodes))
 
     total_time = time.time()
