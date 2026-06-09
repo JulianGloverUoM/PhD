@@ -132,6 +132,44 @@ def frobenius_norm(A):
 #############################################################################
 
 
+def boundary_node_side_masks(input_nodes, boundary_nodes, L, tol=1e-8):
+    boundary_indices = np.arange(boundary_nodes, len(input_nodes))
+
+    boundary_positions = input_nodes[boundary_indices]
+
+    top_mask = np.isclose(boundary_positions[:, 1], L, atol=tol, rtol=0.0)
+    bot_mask = np.isclose(boundary_positions[:, 1], 0.0, atol=tol, rtol=0.0)
+    left_mask = np.isclose(boundary_positions[:, 0], 0.0, atol=tol, rtol=0.0)
+    right_mask = np.isclose(boundary_positions[:, 0], L, atol=tol, rtol=0.0)
+
+    return {
+        "top": boundary_indices[top_mask],
+        "bot": boundary_indices[bot_mask],
+        "left": boundary_indices[left_mask],
+        "right": boundary_indices[right_mask],
+    }
+
+
+def snap_boundary_nodes(input_nodes, reference_nodes, L, tol=1e-8):
+    output = input_nodes.copy()
+
+    left = np.isclose(reference_nodes[:, 0], 0.0, atol=tol, rtol=0.0)
+    right = np.isclose(reference_nodes[:, 0], L, atol=tol, rtol=0.0)
+    bot = np.isclose(reference_nodes[:, 1], 0.0, atol=tol, rtol=0.0)
+    top = np.isclose(reference_nodes[:, 1], L, atol=tol, rtol=0.0)
+
+    output[left, 0] = 0.0
+    output[right, 0] = L
+    output[bot, 1] = 0.0
+    output[top, 1] = L
+
+    return output
+
+
+#############################################################################
+#############################################################################
+
+
 def calculate_stress_strain_stretch(
     data, Lambda_1_step, Lambda_2_step, num_steps, L, fibre_lengths_multiplier
 ):
@@ -199,6 +237,7 @@ def BDF_timestepper_dilation(
     nodes,
     incidence_matrix,
     boundary_nodes,
+    side_masks,
     initial_lengths,
     Lambda_1,
     Lambda_2,
@@ -345,9 +384,8 @@ def BDF_timestepper_dilation(
             break
 
         if sol.t >= 100:
-            print("Slow convergence")
+            print("Slow convergence", f"{max_force:.3}")
             slow_convergence = True
-            print(max_force)
             break
 
     if increasing_energy or slow_convergence:
@@ -369,7 +407,13 @@ def BDF_timestepper_dilation(
             sol.step()
 
             if sol.status in ("finished", "failed"):
-                print("Equilibrium failed")
+                new_t = sol.t
+                new_y = sol.y.copy()
+
+                rhs = scipy_fun(None, new_y)
+                force_magnitudes = vector_of_magnitudes(rhs.reshape(num_nodes, 2))
+                max_force = np.max(force_magnitudes)
+                print("Equilibrium failed", f"{max_force:.3}")
                 break
 
             new_t = sol.t
@@ -395,36 +439,20 @@ def BDF_timestepper_dilation(
                 break
 
             if sol.t >= 100 * (2 + hundereds_count):
-                print("Equilibrium not achieved in {} tau".format(100 * (2 + hundereds_count)))
+                print(
+                    "Equilibrium not achieved in {} tau".format(100 * (2 + hundereds_count)),
+                    f"{max_force:.3}",
+                )
                 hundereds_count += 1
 
-    top_nodes = []
-
-    bot_nodes = []
-
-    left_nodes = []
-
-    right_nodes = []
-
-    for i in range(len(nodes[boundary_nodes:])):
-        if abs(nodes[i + boundary_nodes][1] - L) <= 1e-15:
-            top_nodes.append(i + boundary_nodes)
-        if abs(nodes[i + boundary_nodes][1] - 0) <= 1e-15:
-            bot_nodes.append(i + boundary_nodes)
-        if abs(nodes[i + boundary_nodes][0] - 0) <= 1e-15:
-            left_nodes.append(i + boundary_nodes)
-        if abs(nodes[i + boundary_nodes][0] - L) <= 1e-15:
-            right_nodes.append(i + boundary_nodes)
+    side_nodes = boundary_node_side_masks(nodes, boundary_nodes, L)
 
     force_all = boundary_force(0, y_val)
 
-    force_top = np.array([force_all[item] for item in top_nodes])
-
-    force_bot = np.array([force_all[item] for item in bot_nodes])
-
-    force_left = np.array([force_all[item] for item in left_nodes])
-
-    force_right = np.array([force_all[item] for item in right_nodes])
+    force_top = force_all[side_nodes["top"]]
+    force_bot = force_all[side_nodes["bot"]]
+    force_left = force_all[side_nodes["left"]]
+    force_right = force_all[side_nodes["right"]]
 
     y_output = y_val.reshape(num_nodes, 2)
     if Plot_networks and (Lambda_1 == 1 and Lambda_2 == 1):
@@ -488,6 +516,8 @@ def Realisation_dilation(
         seed,
     )
 
+    side_masks = boundary_node_side_masks(nodes, L)
+
     initial_lengths = fibre_lengths_multiplier * vector_of_magnitudes(incidence_matrix.dot(nodes))
 
     total_time = time.time()
@@ -516,8 +546,9 @@ def Realisation_dilation(
             1 + Lambda_1_step * i,
             1 + Lambda_2_step * i,
         )
+        input_nodes = snap_boundary_nodes(input_nodes, nodes, L)
 
-    print("Total Deformation Computational time = ", time.time() - total_time)
+    # print("Total Deformation Computational time = ", time.time() - total_time)
 
     (p_top, p_bot, p_left, p_right) = calculate_stress_strain_stretch(
         data, Lambda_1_step, Lambda_2_step, num_steps, L, fibre_lengths_multiplier
@@ -616,7 +647,7 @@ def Realisation_dilation(
                 f,
             )
 
-    print("Total Realisation time =", time.time() - realisation_start_time)
+    # print("Total Realisation time =", time.time() - realisation_start_time)
 
     return (
         data,
