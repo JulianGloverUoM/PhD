@@ -36,7 +36,7 @@ class Fibre_Law:
     stiffness: callable  # dF(lambda)/dlambda
 
 
-def make_fibre_law(key, alpha=None):
+def make_fibre_law(key, alpha=None, k=1):
     if key == "Hookean_spring":
         return Fibre_Law(
             name="Hookean_spring",
@@ -84,6 +84,18 @@ def make_fibre_law(key, alpha=None):
             force=lambda stretch: np.log(stretch),
             energy=lambda stretch, L_0: L_0 * stretch * (np.log(stretch) - 1),
             stiffness=lambda stretch: 1 / stretch,
+        )
+    elif key == "Exponential_law":
+        if k is None:
+            raise ValueError("Exponential_law requires k.")
+        if not (k > 0.0):
+            raise ValueError("Exponential_law requires k > 0.")
+        return Fibre_Law(
+            name="Exponential_law",
+            force=lambda stretch: (stretch - 1) * np.exp(k * (stretch - 1) ** 2),
+            energy=lambda stretch, L_0: (L_0 / (2 * k)) * (np.exp(k * (stretch - 1) ** 2) - 1),
+            stiffness=lambda stretch: (1 + 2 * k * (stretch - 1) ** 2)
+            * np.exp(k * (stretch - 1) ** 2),
         )
     else:
         raise ValueError(f"Unknown fibre law: {key}")
@@ -236,16 +248,16 @@ def BDF_timestepper_dilation(
     L,
     nodes,
     incidence_matrix,
-    boundary_nodes,
-    side_masks,
+    boundary_nodes,z
     initial_lengths,
     Lambda_1,
     Lambda_2,
     Plot_networks=False,
     Fibre_law="Hookean_spring",
     alpha=0.1,
+    k=1,
 ):
-    law = make_fibre_law(Fibre_law, alpha)
+    law = make_fibre_law(Fibre_law, alpha, k)
     (num_edges, num_nodes) = incidence_matrix.shape
     inv_initial_lengths = 1.0 / initial_lengths
     incidence_matrix_T = incidence_matrix.T.tocsr()
@@ -347,6 +359,7 @@ def BDF_timestepper_dilation(
     energy_vals = [energy_val]
     norm_vals = [np.linalg.norm(scipy_fun(None, y_val))]
     t_vals = [t_val]
+    force_vals = [np.max(vector_of_magnitudes(scipy_fun(None, y_val).reshape(num_nodes, 2)))]
 
     while True:
         sol.step()
@@ -378,7 +391,8 @@ def BDF_timestepper_dilation(
         t_vals.append(t_val)
         energy_vals.append(energy_val)
         norm_vals.append(np.linalg.norm(rhs))
-
+        force_vals.append(max_force)
+  
         if max_force < 1e-4:
             print("Equilibrium achieved")
             break
@@ -410,10 +424,10 @@ def BDF_timestepper_dilation(
                 new_t = sol.t
                 new_y = sol.y.copy()
 
-                rhs = scipy_fun(None, new_y)
-                force_magnitudes = vector_of_magnitudes(rhs.reshape(num_nodes, 2))
-                max_force = np.max(force_magnitudes)
-                print("Equilibrium failed", f"{max_force:.3}")
+                # rhs = scipy_fun(None, new_y)
+                # force_magnitudes = vector_of_magnitudes(rhs.reshape(num_nodes, 2))
+                # max_force = np.max(force_magnitudes)
+                print("Equilibrium failed")  # , f"{max_force:.3}")
                 break
 
             new_t = sol.t
@@ -433,6 +447,7 @@ def BDF_timestepper_dilation(
             t_vals.append(t_val)
             energy_vals.append(energy_val)
             norm_vals.append(np.linalg.norm(rhs))
+            force_vals.append(max_force)
 
             if max_force < 1e-4:
                 print("Equilibrium achieved")
@@ -478,7 +493,7 @@ def BDF_timestepper_dilation(
             pass
     return (
         [force_top, force_bot, force_left, force_right],
-        [t_vals, norm_vals],
+        [t_vals, norm_vals, force_vals],
         y_output,
         energy_vals,
     )
@@ -500,6 +515,9 @@ def Realisation_dilation(
     num_steps,
     Plot_stress_results=False,
     Plot_networks=False,
+    Fibre_law="Hookean_spring",
+    alpha=0.1,
+    k=1,
     save_path=None,
 ):
     realisation_start_time = time.time()
