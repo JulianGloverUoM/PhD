@@ -36,7 +36,7 @@ class Fibre_Law:
     stiffness: callable  # dF(lambda)/dlambda
 
 
-def make_fibre_law(key, alpha=None, k=1):
+def make_fibre_law(key, alpha=None, k=None):
     if key == "Hookean_spring":
         return Fibre_Law(
             name="Hookean_spring",
@@ -90,12 +90,18 @@ def make_fibre_law(key, alpha=None, k=1):
             raise ValueError("Exponential_law requires k.")
         if not (k > 0.0):
             raise ValueError("Exponential_law requires k > 0.")
+        strain_cap = 20 / np.sqrt(k)
+
+        def capped_strain(stretch):
+            return np.clip(stretch - 1.0, -strain_cap, strain_cap)
+
         return Fibre_Law(
-            name="Exponential_law",
-            force=lambda stretch: (stretch - 1) * np.exp(k * (stretch - 1) ** 2),
-            energy=lambda stretch, L_0: (L_0 / (2 * k)) * (np.exp(k * (stretch - 1) ** 2) - 1),
-            stiffness=lambda stretch: (1 + 2 * k * (stretch - 1) ** 2)
-            * np.exp(k * (stretch - 1) ** 2),
+            name=f"Exponential_law_k_{k}",
+            force=lambda stretch: capped_strain(stretch) * np.exp(k * capped_strain(stretch) ** 2),
+            energy=lambda stretch, L_0: (L_0 / (2.0 * k))
+            * (np.exp(k * capped_strain(stretch) ** 2) - 1.0),
+            stiffness=lambda stretch: (1.0 + 2.0 * k * capped_strain(stretch) ** 2)
+            * np.exp(k * capped_strain(stretch) ** 2),
         )
     else:
         raise ValueError(f"Unknown fibre law: {key}")
@@ -248,7 +254,7 @@ def BDF_timestepper_dilation(
     L,
     nodes,
     incidence_matrix,
-    boundary_nodes,z
+    boundary_nodes,
     initial_lengths,
     Lambda_1,
     Lambda_2,
@@ -262,12 +268,43 @@ def BDF_timestepper_dilation(
     inv_initial_lengths = 1.0 / initial_lengths
     incidence_matrix_T = incidence_matrix.T.tocsr()
 
+    def check_state(t, y):
+        matrix_y = y.reshape(num_nodes, 2)
+        l_j = incidence_matrix.dot(matrix_y)
+        l_j_lengths = np.linalg.norm(l_j, axis=1)
+        stretches = l_j_lengths * inv_initial_lengths
+        forces = law.force(stretches)
+        stiffnesses = law.stiffness(stretches)
+
+        if (
+            not np.all(np.isfinite(stretches))
+            or not np.all(np.isfinite(forces))
+            or not np.all(np.isfinite(stiffnesses))
+            or np.max(stretches) > 20
+            or np.max(stiffnesses) > 1e12
+        ):
+            worst = np.argmax(stretches)
+            raise RuntimeError(
+                f"Bad state at t={t}: "
+                f"max stretch={stretches[worst]:.6g}, "
+                f"initial length={initial_lengths[worst]:.6g}, "
+                f"current length={l_j_lengths[worst]:.6g}, "
+                f"force={forces[worst]:.6g}, "
+                f"stiffness={stiffnesses[worst]:.6g}"
+            )
+
     def scipy_fun(t, y):
         matrix_y = y.reshape(num_nodes, 2)
         l_j = incidence_matrix.dot(matrix_y)
         l_j_lengths = np.linalg.norm(l_j, axis=1)
+        if np.any(l_j_lengths <= 1e-14):
+            bad_edges = np.where(l_j_lengths <= 1e-14)[0]
+            raise RuntimeError(
+                f"Collapsed edge(s): {bad_edges[:10]}, " f"min length = {np.min(l_j_lengths):.3e}"
+            )
         l_j_hat = l_j / l_j_lengths[:, None]
         stretches = l_j_lengths * inv_initial_lengths
+        # check_state(t, y)
         F_j = law.force(stretches)
         product = l_j_hat * F_j[:, None]
         f_jk = incidence_matrix_T.dot(product)
@@ -291,6 +328,18 @@ def BDF_timestepper_dilation(
         l_j_lengths = np.linalg.norm(l_j, axis=1)
         stretches = l_j_lengths * inv_initial_lengths
         return np.sum(law.energy(stretches, initial_lengths))
+
+    def jacobian(t, y):
+        matrix_y = y.reshape(num_nodes, 2)
+
+        H = hessian(matrix_y, incidence_matrix, initial_lengths, Fibre_law, alpha, k).tolil()
+
+        # Boundary rows are fixed: RHS is zero for boundary nodes,
+        # so derivative of boundary RHS rows should be zero.
+        for node in range(boundary_nodes, num_nodes):
+            H[2 * node : 2 * node + 2, :] = 0.0
+
+        return -H.tocsr()
 
     # Effectively computes the Jacobian but with all potential non-zero elements = 1, which
     # gives the sparsity structure of the Jacobian without having to do the expensive computation
@@ -335,11 +384,15 @@ def BDF_timestepper_dilation(
 
     max_tau = 500.0
 
+    y = dilation_deformation(nodes, Lambda_1, Lambda_2)
+    y = np.reshape(y, 2 * np.shape(y)[0], order="C")
+
     sol = sp.integrate.BDF(
         scipy_fun,
         0.0,
         y,
         max_tau,
+        first_step=1e-8,
         max_step=np.inf,
         rtol=1e-6,
         atol=1e-6,
@@ -360,7 +413,6 @@ def BDF_timestepper_dilation(
     norm_vals = [np.linalg.norm(scipy_fun(None, y_val))]
     t_vals = [t_val]
     force_vals = [np.max(vector_of_magnitudes(scipy_fun(None, y_val).reshape(num_nodes, 2)))]
-
     while True:
         sol.step()
 
@@ -392,9 +444,11 @@ def BDF_timestepper_dilation(
         energy_vals.append(energy_val)
         norm_vals.append(np.linalg.norm(rhs))
         force_vals.append(max_force)
-  
+
         if max_force < 1e-4:
-            print("Equilibrium achieved")
+            # if Lambda_1 == 1 and Lambda_2 == 1:
+            #     break
+            # print("Equilibrium achieved")
             break
 
         if sol.t >= 100:
@@ -410,6 +464,7 @@ def BDF_timestepper_dilation(
             t_val,
             y_val,
             max_tau,
+            first_step=1e-8,
             max_step=np.inf,
             rtol=1e-10,
             atol=1e-10,
@@ -471,12 +526,13 @@ def BDF_timestepper_dilation(
 
     y_output = y_val.reshape(num_nodes, 2)
     if Plot_networks and (Lambda_1 == 1 and Lambda_2 == 1):
-        Network_generation.NetworkPlot(
-            L,
-            y_output,
-            boundary_nodes,
-            incidence_matrix,
-        )
+        y_output = y_val.reshape(num_nodes, 2)
+        # Network_generation.NetworkPlot(
+        #     L,
+        #     y_output,
+        #     boundary_nodes,
+        #     incidence_matrix,
+        # )
     elif Plot_networks and (max_force < 1e-4):
         try:
             stretches = vector_of_magnitudes(incidence_matrix @ y_output) / initial_lengths
@@ -554,6 +610,9 @@ def Realisation_dilation(
                 1 + Lambda_1_step * i,
                 1 + Lambda_2_step * i,
                 Plot_networks,
+                Fibre_law,
+                alpha,
+                k,
             )
         )
         # Each step we provide a guess for the solution at the next step using the previous solution
@@ -672,7 +731,15 @@ def Realisation_dilation(
     )
 
 
-def hessian(nodes, incidence_matrix, initial_lengths, law="Hookean_spring"):
+def hessian(
+    nodes,
+    incidence_matrix,
+    initial_lengths,
+    Fibre_law="Hookean_spring",
+    alpha=0.1,
+    k=1,
+):
+    law = make_fibre_law(Fibre_law, alpha, k)
     num_edges, num_nodes = np.shape(incidence_matrix)
 
     inv_initial_lengths = 1.0 / initial_lengths
