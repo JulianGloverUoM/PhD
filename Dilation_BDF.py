@@ -448,7 +448,7 @@ def BDF_timestepper_dilation(
         if max_force < 1e-4:
             # if Lambda_1 == 1 and Lambda_2 == 1:
             #     break
-            # print("Equilibrium achieved")
+            print("Equilibrium achieved")
             break
 
         if sol.t >= 100:
@@ -574,7 +574,7 @@ def Realisation_dilation(
     Fibre_law="Hookean_spring",
     alpha=0.1,
     k=1,
-    save_path=None,
+    save_path="",
 ):
     realisation_start_time = time.time()
     data = []
@@ -695,33 +695,57 @@ def Realisation_dilation(
             )
         )
     if save_path is not None:
-        os.makedirs(save_path, exist_ok=True)
+        if save_path == "":
+            filename = "Dilation_BDF_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.dat".format(
+                Fibre_law,
+                L,
+                density,
+                seed,
+                fibre_lengths_multiplier,
+                max_Lambda_1,
+                max_Lambda_2,
+                num_steps,
+                Plot_stress_results,
+                Plot_networks,
+                date.today(),
+            )
+            with open(filename, "wb") as f:
+                pickle.dump(
+                    (
+                        data,
+                        [p_top, p_bot, p_left, p_right],
+                        (nodes, initial_lengths, incidence_matrix),
+                    ),
+                    f,
+                )
+        else:
+            os.makedirs(save_path, exist_ok=True)
 
-        filename = "Dilation_BDF_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.dat".format(
-            L,
-            density,
-            seed,
-            fibre_lengths_multiplier,
-            max_Lambda_1,
-            max_Lambda_2,
-            num_steps,
-            Plot_stress_results,
-            Plot_networks,
-            date.today(),
-        )
-
-        full_save_path = os.path.join(save_path, filename)
-
-        with open(full_save_path, "wb") as f:
-            pickle.dump(
-                (
-                    data,
-                    [p_top, p_bot, p_left, p_right],
-                    (nodes, initial_lengths, incidence_matrix),
-                ),
-                f,
+            filename = "Dilation_BDF_realisation_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}_{}.dat".format(
+                Fibre_law,
+                L,
+                density,
+                seed,
+                fibre_lengths_multiplier,
+                max_Lambda_1,
+                max_Lambda_2,
+                num_steps,
+                Plot_stress_results,
+                Plot_networks,
+                date.today(),
             )
 
+            full_save_path = os.path.join(save_path, filename)
+
+            with open(full_save_path, "wb") as f:
+                pickle.dump(
+                    (
+                        data,
+                        [p_top, p_bot, p_left, p_right],
+                        (nodes, initial_lengths, incidence_matrix),
+                    ),
+                    f,
+                )
     # print("Total Realisation time =", time.time() - realisation_start_time)
 
     return (
